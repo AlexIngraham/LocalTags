@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DECK — MP3 Tag Writer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#1b1815;
+    --panel:#221e19;
+    --panel-edge:#2c2721;
+    --paper:#eae2d3;
+    --paper-shadow:#c9bfa9;
+    --ink:#2a2419;
+    --ink-soft:#5c5245;
+    --cream:#f3ede1;
+    --muted:#9c9384;
+    --red:#b23a2e;
+    --red-bright:#d4483a;
+    --amber:#c89b3c;
+    --green:#6b8f55;
+    --hairline:#3a332b;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(ellipse at 20% -10%, #2a2520 0%, transparent 55%),
+      radial-gradient(ellipse at 90% 110%, #201c17 0%, transparent 50%),
+      var(--bg);
+    color:var(--cream);
+    font-family:'IBM Plex Sans', sans-serif;
+    min-height:100vh;
+    padding:48px 20px 80px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:640px;margin:0 auto;}
+
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    letter-spacing:.22em;
+    color:var(--amber);
+    text-transform:uppercase;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:10px;
+  }
+  .eyebrow::before{
+    content:"";
+    width:7px;height:7px;border-radius:50%;
+    background:var(--red-bright);
+    box-shadow:0 0 8px var(--red-bright);
+  }
+  h1{
+    font-family:'Big Shoulders Display', sans-serif;
+    font-weight:800;
+    font-size:clamp(48px,10vw,72px);
+    letter-spacing:.01em;
+    line-height:.9;
+    margin:0 0 6px;
+    color:var(--cream);
+  }
+  .sub{
+    color:var(--muted);
+    font-size:15px;
+    max-width:46ch;
+    line-height:1.5;
+    margin:0 0 40px;
+  }
+  .sub strong{color:var(--cream);font-weight:500;}
+
+  /* ---- Deck shell ---- */
+  .deck{
+    background:linear-gradient(180deg,var(--panel),var(--panel-edge));
+    border:1px solid var(--hairline);
+    border-radius:18px;
+    padding:28px;
+    position:relative;
+    box-shadow:0 30px 60px -30px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.03);
+  }
+  .reels{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:6px 34px 26px;
+  }
+  .reel-hub{width:88px;height:88px;position:relative;}
+  .reel-hub svg{width:100%;height:100%;display:block;}
+  .reel-hub .ring{
+    transform-origin:center;
+    animation:spin 6s linear infinite;
+    animation-play-state:paused;
+  }
+  .deck.has-file .reel-hub .ring{animation-play-state:running;}
+  .deck.processing .reel-hub .ring{animation-duration:.5s;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .tape-window{
+    flex:1;
+    height:2px;
+    margin:0 18px;
+    background:repeating-linear-gradient(90deg,var(--hairline) 0 6px, transparent 6px 12px);
+    position:relative;
+    top:6px;
+  }
+
+  .dropzone{
+    border:1.5px dashed var(--hairline);
+    border-radius:12px;
+    padding:36px 20px;
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s ease, background .15s ease;
+    background:rgba(0,0,0,.12);
+  }
+  .dropzone:hover, .dropzone.drag{
+    border-color:var(--amber);
+    background:rgba(200,155,60,.06);
+  }
+  .dropzone .dz-title{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13px;
+    letter-spacing:.08em;
+    color:var(--cream);
+    text-transform:uppercase;
+  }
+  .dropzone .dz-sub{
+    font-size:12px;
+    color:var(--muted);
+    margin-top:6px;
+  }
+  input[type=file]{display:none;}
+
+  .file-info{
+    display:none;
+    align-items:center;
+    justify-content:space-between;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12.5px;
+    color:var(--muted);
+    padding:12px 4px 0;
+  }
+  .deck.has-file .file-info{display:flex;}
+  .deck.has-file .dropzone{display:none;}
+  .file-info .fname{color:var(--cream);}
+  .file-info .swap{
+    color:var(--amber);
+    cursor:pointer;
+    text-decoration:underline;
+    text-underline-offset:3px;
+    background:none;border:none;
+    font-family:inherit;font-size:inherit;
+  }
+
+  /* ---- Label card ---- */
+  .label-card{
+    background:var(--paper);
+    color:var(--ink);
+    border-radius:10px;
+    margin-top:22px;
+    padding:22px 22px 20px;
+    box-shadow:0 14px 26px -14px rgba(0,0,0,.5), 0 0 0 1px var(--paper-shadow) inset;
+    position:relative;
+    display:grid;
+    grid-template-columns:1fr 108px;
+    gap:20px 22px;
+    opacity:.35;
+    pointer-events:none;
+    filter:grayscale(.4);
+    transition:opacity .2s ease, filter .2s ease;
+  }
+  .deck.has-file ~ .label-card{
+    opacity:1;pointer-events:auto;filter:none;
+  }
+  .label-card .stitch{
+    position:absolute;inset:6px;
+    border:1.5px dashed var(--paper-shadow);
+    border-radius:6px;
+    pointer-events:none;
+  }
+  .fields{display:flex;flex-direction:column;gap:14px;}
+  .field label{
+    display:block;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:10.5px;
+    letter-spacing:.15em;
+    color:var(--ink-soft);
+    text-transform:uppercase;
+    margin-bottom:5px;
+  }
+  .field input{
+    width:100%;
+    border:none;
+    border-bottom:1.5px solid var(--paper-shadow);
+    background:transparent;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:16px;
+    color:var(--ink);
+    padding:4px 2px 6px;
+    outline:none;
+  }
+  .field input::placeholder{color:#b8ac93;}
+  .field input:focus{border-bottom-color:var(--red);}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+
+  .cover-slot{
+    display:flex;flex-direction:column;align-items:center;gap:8px;
+  }
+  .cover-drop{
+    width:108px;height:108px;
+    border:1.5px dashed var(--paper-shadow);
+    border-radius:6px;
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;
+    background:#dfd6c1;
+    overflow:hidden;
+    position:relative;
+  }
+  .cover-drop img{width:100%;height:100%;object-fit:cover;display:none;}
+  .cover-drop.has-img img{display:block;}
+  .cover-drop.has-img .cover-placeholder{display:none;}
+  .cover-placeholder{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:10px;
+    letter-spacing:.08em;
+    text-align:center;
+    color:var(--ink-soft);
+    line-height:1.4;
+    padding:6px;
+  }
+  .cover-label{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:10px;
+    letter-spacing:.15em;
+    color:var(--ink-soft);
+    text-transform:uppercase;
+  }
+
+  /* ---- Action ---- */
+  .action{
+    margin-top:22px;
+    display:flex;align-items:center;gap:16px;
+    flex-wrap:wrap;
+  }
+  button.write{
+    font-family:'IBM Plex Mono', monospace;
+    font-weight:600;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    font-size:13px;
+    color:var(--cream);
+    background:var(--red);
+    border:none;
+    padding:14px 26px;
+    border-radius:8px;
+    cursor:pointer;
+    transition:background .15s ease, transform .1s ease;
+  }
+  button.write:hover:not(:disabled){background:var(--red-bright);}
+  button.write:active:not(:disabled){transform:scale(.98);}
+  button.write:disabled{background:#4a4038;color:var(--muted);cursor:not-allowed;}
+
+  .status{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12.5px;
+    color:var(--muted);
+  }
+  .status.ok{color:var(--green);}
+
+  .download-link{
+    display:none;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13px;
+    color:var(--green);
+    text-decoration:underline;
+    text-underline-offset:3px;
+  }
+
+  footer{
+    text-align:center;
+    margin-top:34px;
+    font-size:12px;
+    color:var(--muted);
+    font-family:'IBM Plex Mono', monospace;
+  }
+
+  @media (max-width:480px){
+    .label-card{grid-template-columns:1fr;}
+    .cover-slot{flex-direction:row;justify-content:flex-start;}
+  }
+
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">runs locally in your browser</div>
+  <h1>DECK</h1>
+  <p class="sub">Load a track, type the label, drop the cover in the sleeve. <strong>Write tags</strong> and a re-tagged file lands in your downloads — ready to drag into Spotify's Local Files.</p>
+
+  <div class="deck" id="deck">
+    <div class="reels">
+      <div class="reel-hub">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle cx="50" cy="50" r="46" fill="none" stroke="#3a332b" stroke-width="2"/>
+          <g class="ring">
+            <circle cx="50" cy="50" r="30" fill="none" stroke="#5c5245" stroke-width="1.5" stroke-dasharray="2 6"/>
+            <circle cx="50" cy="50" r="10" fill="#2c2721" stroke="#5c5245" stroke-width="2"/>
+            <circle cx="50" cy="24" r="3" fill="#5c5245"/>
+          </g>
+        </svg>
+      </div>
+      <div class="tape-window"></div>
+      <div class="reel-hub">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle cx="50" cy="50" r="46" fill="none" stroke="#3a332b" stroke-width="2"/>
+          <g class="ring">
+            <circle cx="50" cy="50" r="30" fill="none" stroke="#5c5245" stroke-width="1.5" stroke-dasharray="2 6"/>
+            <circle cx="50" cy="50" r="10" fill="#2c2721" stroke="#5c5245" stroke-width="2"/>
+            <circle cx="50" cy="24" r="3" fill="#5c5245"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose an MP3 file">
+      <div class="dz-title">Drop an MP3 here</div>
+      <div class="dz-sub">or click to browse — .mp3 only</div>
+      <input type="file" id="file-input" accept="audio/mpeg,.mp3">
+    </div>
+
+    <div class="file-info">
+      <span class="fname" id="fname">—</span>
+      <button type="button" class="swap" id="swap-file">load a different file</button>
+    </div>
+  </div>
+
+  <div class="label-card" id="label-card">
+    <div class="stitch"></div>
+    <div class="fields">
+      <div class="field">
+        <label for="f-title">Title</label>
+        <input id="f-title" type="text" placeholder="Second Arrangement" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="f-artist">Artist</label>
+        <input id="f-artist" type="text" placeholder="Steely Dan" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="f-album">Album</label>
+        <input id="f-album" type="text" placeholder="The Royal Scam" autocomplete="off">
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="f-track">Track №</label>
+          <input id="f-track" type="text" placeholder="3" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="f-genre">Genre</label>
+          <input id="f-genre" type="text" placeholder="Jazz Rock" autocomplete="off">
+        </div>
+      </div>
+    </div>
+
+    <div class="cover-slot">
+      <span class="cover-label">Cover</span>
+      <div class="cover-drop" id="cover-drop" tabindex="0" role="button" aria-label="Choose cover art">
+        <img id="cover-img" alt="">
+        <div class="cover-placeholder">drop<br>art</div>
+        <input type="file" id="cover-input" accept="image/jpeg,image/png">
+      </div>
+    </div>
+  </div>
+
+  <div class="action">
+    <button type="button" class="write" id="write-btn" disabled>Write tags</button>
+    <span class="status" id="status"></span>
+    <a class="download-link" id="download-link">↓ download re-tagged file</a>
+  </div>
+
+  <footer>no upload, no server — the mp3 never leaves this device</footer>
+</div>
+
+<script>
+(function(){
+  const deck = document.getElementById('deck');
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('file-input');
+  const fname = document.getElementById('fname');
+  const swapBtn = document.getElementById('swap-file');
+  const coverDrop = document.getElementById('cover-drop');
+  const coverInput = document.getElementById('cover-input');
+  const coverImg = document.getElementById('cover-img');
+  const writeBtn = document.getElementById('write-btn');
+  const statusEl = document.getElementById('status');
+  const downloadLink = document.getElementById('download-link');
+
+  let audioBuffer = null;
+  let audioName = '';
+  let coverBytes = null;
+  let coverMime = null;
+  let coverObjectUrl = null;
+  let downloadObjectUrl = null;
+
+  function setStatus(text, ok){
+    statusEl.textContent = text || '';
+    statusEl.classList.toggle('ok', !!ok);
+  }
+
+  function checkReady(){
+    writeBtn.disabled = !audioBuffer;
+  }
+
+  function revoke(url){
+    if(url) URL.revokeObjectURL(url);
+  }
+
+  // ---- audio file handling ----
+  function loadAudioFile(file){
+    if(!file) return;
+    if(!/\.mp3$/i.test(file.name) && file.type !== 'audio/mpeg'){
+      setStatus('please choose an .mp3 file');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      audioBuffer = reader.result;
+      audioName = file.name;
+      fname.textContent = file.name + '  ·  ' + (file.size/1024/1024).toFixed(2) + ' MB';
+      deck.classList.add('has-file');
+      setStatus('');
+      downloadLink.style.display = 'none';
+      revoke(downloadObjectUrl);
+      downloadObjectUrl = null;
+      checkReady();
+    };
+    reader.onerror = () => setStatus('could not read that file');
+    reader.readAsArrayBuffer(file);
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('keydown', e => {
+    if(e.key === 'Enter' || e.key === ' '){
+      e.preventDefault();
+      fileInput.click();
+    }
+  });
+  fileInput.addEventListener('change', e => loadAudioFile(e.target.files[0]));
+
+  ['dragover','dragenter'].forEach(evt =>
+    dropzone.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.add('drag'); })
+  );
+  ['dragleave','drop'].forEach(evt =>
+    dropzone.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.remove('drag'); })
+  );
+  dropzone.addEventListener('drop', e => loadAudioFile(e.dataTransfer.files[0]));
+
+  swapBtn.addEventListener('click', () => {
+    audioBuffer = null;
+    audioName = '';
+    deck.classList.remove('has-file');
+    fileInput.value = '';
+    fname.textContent = '—';
+    downloadLink.style.display = 'none';
+    revoke(downloadObjectUrl);
+    downloadObjectUrl = null;
+    setStatus('');
+    checkReady();
+  });
+
+  // ---- cover art handling ----
+  function loadCoverFile(file){
+    if(!file) return;
+    if(!/^image\/(jpeg|png)$/.test(file.type)){
+      setStatus('cover art must be jpg or png');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      coverBytes = new Uint8Array(reader.result);
+      coverMime = file.type;
+      revoke(coverObjectUrl);
+      coverObjectUrl = URL.createObjectURL(file);
+      coverImg.src = coverObjectUrl;
+      coverDrop.classList.add('has-img');
+    };
+    reader.readAsArrayBuffer(file);
+  }
+  coverDrop.addEventListener('click', () => coverInput.click());
+  coverDrop.addEventListener('keydown', e => {
+    if(e.key === 'Enter' || e.key === ' '){
+      e.preventDefault();
+      coverInput.click();
+    }
+  });
+  coverInput.addEventListener('change', e => loadCoverFile(e.target.files[0]));
+  ['dragover','dragenter'].forEach(evt =>
+    coverDrop.addEventListener(evt, e => { e.preventDefault(); coverDrop.style.borderColor = '#b23a2e'; })
+  );
+  coverDrop.addEventListener('dragleave', () => { coverDrop.style.borderColor = ''; });
+  coverDrop.addEventListener('drop', e => {
+    e.preventDefault();
+    coverDrop.style.borderColor = '';
+    loadCoverFile(e.dataTransfer.files[0]);
+  });
+
+  // ============ ID3v2.3 writer (no dependencies) ============
+  function synchsafe(num){
+    return new Uint8Array([(num>>21)&0x7F,(num>>14)&0x7F,(num>>7)&0x7F,num&0x7F]);
+  }
+  function uint32be(num){
+    return new Uint8Array([(num>>>24)&0xFF,(num>>>16)&0xFF,(num>>>8)&0xFF,num&0xFF]);
+  }
+  function asciiBytes(str){
+    const out = new Uint8Array(str.length);
+    for(let i=0;i<str.length;i++) out[i] = str.charCodeAt(i) & 0xFF;
+    return out;
+  }
+  function concat(arrays){
+    let total = 0;
+    for(const a of arrays) total += a.length;
+    const out = new Uint8Array(total);
+    let off = 0;
+    for(const a of arrays){ out.set(a, off); off += a.length; }
+    return out;
+  }
+  function buildTextFrame(id, text){
+    const body = [0xFF, 0xFE];
+    for(let i=0;i<text.length;i++){
+      const code = text.charCodeAt(i);
+      body.push(code & 0xFF, (code>>8)&0xFF);
+    }
+    body.push(0,0);
+    const content = concat([new Uint8Array([0x01]), Uint8Array.from(body)]);
+    const header = concat([asciiBytes(id), uint32be(content.length), new Uint8Array([0,0])]);
+    return concat([header, content]);
+  }
+  function buildApicFrame(mime, dataBytes, description){
+    description = description || 'Cover';
+    const mimeBytes = asciiBytes(mime);
+    const descBytes = asciiBytes(description);
+    const prefix = concat([
+      new Uint8Array([0x00]),
+      mimeBytes, new Uint8Array([0x00]),
+      new Uint8Array([0x03]),
+      descBytes, new Uint8Array([0x00])
+    ]);
+    const content = concat([prefix, dataBytes]);
+    const header = concat([asciiBytes('APIC'), uint32be(content.length), new Uint8Array([0,0])]);
+    return concat([header, content]);
+  }
+  function existingID3v2Size(bytes){
+    if(bytes.length >= 10 && bytes[0]===0x49 && bytes[1]===0x44 && bytes[2]===0x33){
+      const size = ((bytes[6]&0x7F)<<21)|((bytes[7]&0x7F)<<14)|((bytes[8]&0x7F)<<7)|(bytes[9]&0x7F);
+      return 10 + size;
+    }
+    return 0;
+  }
+  function hasID3v1(bytes){
+    if(bytes.length < 128) return false;
+    const tail = bytes.subarray(bytes.length-128, bytes.length-125);
+    return tail[0]===0x54 && tail[1]===0x41 && tail[2]===0x47;
+  }
+
+  function writeTags(){
+    const title = document.getElementById('f-title').value.trim();
+    const artist = document.getElementById('f-artist').value.trim();
+    const album = document.getElementById('f-album').value.trim();
+    const track = document.getElementById('f-track').value.trim();
+    const genre = document.getElementById('f-genre').value.trim();
+
+    const frames = [];
+    if(title) frames.push(buildTextFrame('TIT2', title));
+    if(artist) frames.push(buildTextFrame('TPE1', artist));
+    if(album) frames.push(buildTextFrame('TALB', album));
+    if(track) frames.push(buildTextFrame('TRCK', track));
+    if(genre) frames.push(buildTextFrame('TCON', genre));
+    if(coverBytes) frames.push(buildApicFrame(coverMime, coverBytes));
+
+    if(frames.length === 0){
+      setStatus('fill in at least one field');
+      return;
+    }
+
+    deck.classList.add('processing');
+    writeBtn.disabled = true;
+    setStatus('writing tags…');
+
+    setTimeout(() => {
+      try{
+        const framesBlob = concat(frames);
+        const header = concat([
+          asciiBytes('ID3'),
+          new Uint8Array([0x03, 0x00]),
+          new Uint8Array([0x00]),
+          synchsafe(framesBlob.length)
+        ]);
+        const fullTag = concat([header, framesBlob]);
+
+        const original = new Uint8Array(audioBuffer);
+        const start = existingID3v2Size(original);
+        let end = original.length;
+        if(hasID3v1(original)) end -= 128;
+        const audioBody = original.subarray(start, end);
+
+        const finalBytes = concat([fullTag, audioBody]);
+        const blob = new Blob([finalBytes], {type:'audio/mpeg'});
+        revoke(downloadObjectUrl);
+        downloadObjectUrl = URL.createObjectURL(blob);
+
+        const safe = s => s.replace(/[\\/:*?"<>|]/g,'').trim();
+        let outName;
+        if(artist && title) outName = safe(artist) + ' - ' + safe(title) + '.mp3';
+        else outName = audioName.replace(/\.mp3$/i,'') + ' (tagged).mp3';
+
+        downloadLink.href = downloadObjectUrl;
+        downloadLink.download = outName;
+        downloadLink.textContent = '↓ download "' + outName + '"';
+        downloadLink.style.display = 'inline';
+
+        setStatus('done — tags written', true);
+      }catch(err){
+        console.error(err);
+        setStatus('something went wrong: ' + err.message);
+      }finally{
+        deck.classList.remove('processing');
+        writeBtn.disabled = false;
+      }
+    }, 450);
+  }
+
+  writeBtn.addEventListener('click', writeTags);
+})();
+</script>
+</body>
+</html>
