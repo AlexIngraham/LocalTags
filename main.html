@@ -3,58 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <title>Spotify Metadata Editor</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-    <div class="container">
-        <h1>Spotify Metadata Editor</h1>
-        <div class="form-container">
-            <form action="/edit" method="post">
-                <input type="file" name="file" placeholder="Select a file">
-                <input type="text" name="title" placeholder="Title">
-                <input type="text" name="artist" placeholder="Artist">
-                <input type="text" name="album" placeholder="Album">
-                <input type="text" name="tracknumber" placeholder="Track Number">
-                <input type="text" name="genre" placeholder="Genre">
-                <input type="file" name="cover" placeholder="Select a cover image">
-                <button type="submit">Edit</button>
-      </form>
-    </div>
-  </div>
-</body>
-<style>
-    .container {
-        ;root{
+    <style>
+        body {
+            font-family: "Inter", sans-serif;
             background-color: #f0f0f0;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
+            margin: 0;
         }
-        .form-container {
+        h1 {
+            text-align: center;
+            font-size: 24px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        h2 {
+            text-align: center;
+            font-size: 16px;
+            font-weight: 400;
+            color: #4a4a4a;
+            margin-top: 0;
+            margin-bottom: 20px;
+        }
+        .container {
             background-color: #fff;
             padding: 20px;
             border-radius: 10px;
             box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.1);
         }
-        .form-container form {
+        form {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 12px;
         }
-        .form-container form input {
-            padding: 10px;
-            border-radius: 5px;
-            border: 1px solid #ccc;
+        form input,
+        form button {
+            padding: 12px;
+            border-radius: 9px;
+            border: 1.5px solid #cccccc;
         }
-        .form-container form button {
-            padding: 10px;
-            border-radius: 5px;
-            border: 1px solid #ccc;
+        form input:hover,
+        form input:focus,
+        form button:hover,
+        form button:focus {
+            border: 2px solid #000000;
         }
-</style>
-
-
-
+    </style>
+</head>
+<body>
+    <h1>Spotify Metadata Editor</h1>
+    <h2>Files all local, does not leave the browser</h2>
+    <div class="container">
+        <form action="/edit" method="post">
+            <input type="file" name="file">
+            <input type="text" name="title" placeholder="Title">
+            <input type="text" name="artist" placeholder="Artist">
+            <input type="text" name="album" placeholder="Album">
+            <input type="text" name="tracknumber" placeholder="Track Number">
+            <input type="text" name="genre" placeholder="Genre">
+            <input type="file" name="cover">
+            <button type="submit">Apply</button>
+        </form>
+    </div>
+</body>
 </html>
+
+<script>
+    const form = document.querySelector("form");
+    form.addEventListener("submit", (e) => {
+        e.preventDEfault();
+        const file = document.querySelector("input[type = 'file']").files[0];
+        const title = document.querySelector("input[name = 'title']").value;
+        const artist = document.querySelector(input[name 'artist']").value;
+        const album = document.querySelector("input[name = 'album']").value;
+        const tracknumber = document.querySelector("input[name = 'tracknumber']").value;
+        const genre = document.querySelector("input[name = 'genre']").value;
+        const cover = document.querySelector("input[type = 'file']").files[0];
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("title", title);
+        formData.append("artist", artist);
+    }
+</script>
