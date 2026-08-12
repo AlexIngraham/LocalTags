@@ -1,95 +1,204 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <title>Spotify Metadata Editor</title>
     <style>
-        body {
-            font-family: "Inter", sans-serif;
-            background-color: #f0f0f0;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-        }
-        h1 {
-            text-align: center;
-            font-size: 24px;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 10px;
-        }
-        h2 {
-            text-align: center;
-            font-size: 16px;
-            font-weight: 400;
-            color: #4a4a4a;
-            margin-top: 0;
-            margin-bottom: 20px;
-        }
-        .container {
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.1);
-        }
-        form {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-        form input,
-        form button {
-            padding: 12px;
-            border-radius: 9px;
-            border: 1.5px solid #cccccc;
-        }
-        form input:hover,
-        form input:focus,
-        form button:hover,
-        form button:focus {
-            border: 2px solid #000000;
-        }
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: #f0f0f0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        margin: 0;
+      }
+      h1 {
+        text-align: center;
+        font-size: 24px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 10px;
+      }
+      h2 {
+        text-align: center;
+        font-size: 16px;
+        font-weight: 400;
+        color: #4a4a4a;
+        margin-top: 0;
+        margin-bottom: 20px;
+      }
+      .container {
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.1);
+        max-width: 400px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      form input,
+      form button {
+        padding: 12px;
+        border-radius: 9px;
+        border: 1.5px solid #cccccc;
+      }
+      form input:hover,
+      form input:focus,
+      form button:hover,
+      form button:focus {
+        border: 2px solid #000000;
+        outline: none;
+      }
+      form button:active {
+        background-color: #000000;
+        color: #ffffff;
+        border: 2px solid #000000;
+      }
+      form button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .status {
+        margin-top: 14px;
+        font-size: 13px;
+        color: #666;
+        text-align: center;
+        min-height: 1.2em;
+      }
+      .status.ok {
+        color: #2e7d32;
+      }
+      .status.err {
+        color: #c62828;
+      }
+      .download-link {
+        display: none;
+        margin-top: 10px;
+        text-align: center;
+        font-size: 13px;
+        color: #2e7d32;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <h1>Spotify Metadata Editor</h1>
     <h2>Files all local, does not leave the browser</h2>
     <div class="container">
-        <form action="/edit" method="post">
-            <input type="file" name="file">
-            <input type="text" name="title" placeholder="Title">
-            <input type="text" name="artist" placeholder="Artist">
-            <input type="text" name="album" placeholder="Album">
-            <input type="text" name="tracknumber" placeholder="Track Number">
-            <input type="text" name="genre" placeholder="Genre">
-            <input type="file" name="cover">
-            <button type="submit">Apply</button>
-        </form>
+      <form id="edit-form">
+        <input type="file" name="file" accept="audio/mpeg,.mp3" required />
+        <input type="text" name="title" placeholder="Title" />
+        <input type="text" name="artist" placeholder="Artist" />
+        <input type="text" name="album" placeholder="Album" />
+        <input type="text" name="tracknumber" placeholder="Track Number" />
+        <input type="text" name="genre" placeholder="Genre" />
+        <input type="file" name="cover" accept="image/jpeg,image/png" />
+        <button type="submit">Apply</button>
+      </form>
+      <p class="status" id="status"></p>
+      <a class="download-link" id="download-link">Download tagged MP3</a>
     </div>
-</body>
-</html>
+    <script type="module">
+      import { ID3Writer } from "https://cdn.jsdelivr.net/npm/browser-id3-writer@6.4.0/+esm";
 
-<script>
-    const form = document.querySelector("form");
-    form.addEventListener("submit", (e) => {
-        e.preventDEfault();
-        const file = document.querySelector("input[type = 'file']").files[0];
-        const title = document.querySelector("input[name = 'title']").value;
-        const artist = document.querySelector(input[name 'artist']").value;
-        const album = document.querySelector("input[name = 'album']").value;
-        const tracknumber = document.querySelector("input[name = 'tracknumber']").value;
-        const genre = document.querySelector("input[name = 'genre']").value;
-        const cover = document.querySelector("input[type = 'file']").files[0];
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("title", title);
-        formData.append("artist", artist);
-    }
-</script>
+      const form = document.getElementById("edit-form");
+      const statusEl = document.getElementById("status");
+      const downloadLink = document.getElementById("download-link");
+      const submitBtn = form.querySelector('button[type="submit"]');
+
+      let downloadUrl = null;
+
+      function setStatus(text, kind) {
+        statusEl.textContent = text || "";
+        statusEl.classList.remove("ok", "err");
+        if (kind) statusEl.classList.add(kind);
+      }
+
+      function safeName(str) {
+        return str.replace(/[\\/:*?"<>|]/g, "").trim();
+      }
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const file = form.querySelector("input[name='file']").files[0];
+        const title = form.querySelector("input[name='title']").value.trim();
+        const artist = form.querySelector("input[name='artist']").value.trim();
+        const album = form.querySelector("input[name='album']").value.trim();
+        const tracknumber = form
+          .querySelector("input[name='tracknumber']")
+          .value.trim();
+        const genre = form.querySelector("input[name='genre']").value.trim();
+        const cover = form.querySelector("input[name='cover']").files[0];
+
+        if (!file) {
+          setStatus("Choose an MP3 file first.", "err");
+          return;
+        }
+
+        if (!title && !artist && !album && !tracknumber && !genre && !cover) {
+          setStatus("Fill in at least one tag field.", "err");
+          return;
+        }
+
+        submitBtn.disabled = true;
+        downloadLink.style.display = "none";
+        setStatus("Writing ID3v2 tags…");
+
+        try {
+          const songBuffer = await file.arrayBuffer();
+          const writer = new ID3Writer(songBuffer);
+
+          if (title) writer.setFrame("TIT2", title);
+          if (artist) writer.setFrame("TPE1", [artist]);
+          if (album) writer.setFrame("TALB", album);
+          if (tracknumber) writer.setFrame("TRCK", tracknumber);
+          if (genre) writer.setFrame("TCON", [genre]);
+
+          if (cover) {
+            const coverBuffer = await cover.arrayBuffer();
+            writer.setFrame("APIC", {
+              type: 3,
+              data: coverBuffer,
+              description: "Cover",
+            });
+          }
+
+          writer.addTag();
+
+          if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+          downloadUrl = writer.getURL();
+
+          const outName =
+            artist && title
+              ? `${safeName(artist)} - ${safeName(title)}.mp3`
+              : file.name.replace(/\.mp3$/i, "") + " (tagged).mp3";
+
+          downloadLink.href = downloadUrl;
+          downloadLink.download = outName;
+          downloadLink.textContent = `Download "${outName}"`;
+          downloadLink.style.display = "block";
+          setStatus("Done — tags written (ID3v2.3).", "ok");
+        } catch (err) {
+          console.error(err);
+          setStatus(err.message || "Could not write tags.", "err");
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
