@@ -20,48 +20,87 @@
         align-items: center;
         min-height: 100vh;
         margin: 0;
+        padding: 24px 16px;
+        box-sizing: border-box;
       }
       h1 {
         text-align: center;
         font-size: 24px;
         font-weight: 600;
         color: #333;
-        margin-bottom: 10px;
+        margin: 0 0 10px;
       }
       h2 {
         text-align: center;
         font-size: 16px;
         font-weight: 400;
         color: #4a4a4a;
-        margin-top: 0;
-        margin-bottom: 20px;
+        margin: 0 0 20px;
       }
       .container {
         background-color: #fff;
-        padding: 20px;
+        padding: 24px;
         border-radius: 10px;
         box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.1);
-        max-width: 400px;
+        max-width: 420px;
         width: 100%;
         box-sizing: border-box;
       }
       form {
         display: flex;
         flex-direction: column;
+        gap: 14px;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        text-align: left;
+      }
+      .field label {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #555;
+      }
+      .field .hint {
+        font-size: 12px;
+        color: #888;
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
         gap: 12px;
       }
-      form input,
+      form input[type="text"],
+      form input[type="file"],
       form button {
         padding: 12px;
         border-radius: 9px;
         border: 1.5px solid #cccccc;
+        font-family: inherit;
+        font-size: 14px;
+        box-sizing: border-box;
+        width: 100%;
       }
-      form input:hover,
-      form input:focus,
+      form input[type="text"]:hover,
+      form input[type="text"]:focus,
+      form input[type="file"]:hover,
+      form input[type="file"]:focus,
       form button:hover,
       form button:focus {
         border: 2px solid #000000;
         outline: none;
+      }
+      form button {
+        margin-top: 4px;
+        cursor: pointer;
+        background: #fff;
+        font-weight: 600;
       }
       form button:active {
         background-color: #000000;
@@ -71,6 +110,11 @@
       form button:disabled {
         opacity: 0.6;
         cursor: not-allowed;
+      }
+      .divider {
+        height: 1px;
+        background: #ececec;
+        margin: 2px 0;
       }
       .status {
         margin-top: 14px;
@@ -99,20 +143,96 @@
     <h2>Files all local, does not leave the browser</h2>
     <div class="container">
       <form id="edit-form">
-        <input type="file" name="file" accept="audio/mpeg,.mp3" required />
-        <input type="text" name="title" placeholder="Title" />
-        <input type="text" name="artist" placeholder="Artist" />
-        <input type="text" name="album" placeholder="Album" />
-        <input type="text" name="tracknumber" placeholder="Track Number" />
-        <input type="text" name="genre" placeholder="Genre" />
-        <input type="file" name="cover" accept="image/jpeg,image/png" />
-        <button type="submit">Apply</button>
+        <div class="field">
+          <label for="file">Audio file</label>
+          <input
+            id="file"
+            type="file"
+            name="file"
+            accept="audio/mpeg,audio/wav,audio/wave,audio/x-wav,.mp3,.wav"
+            required
+          />
+          <span class="hint">MP3 (ID3v2) or WAV (RIFF INFO)</span>
+        </div>
+
+        <div class="divider" aria-hidden="true"></div>
+
+        <div class="field">
+          <label for="title">Title</label>
+          <input
+            id="title"
+            type="text"
+            name="title"
+            placeholder="Song title"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="field">
+          <label for="artist">Artist</label>
+          <input
+            id="artist"
+            type="text"
+            name="artist"
+            placeholder="Artist name"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="field">
+          <label for="album">Album</label>
+          <input
+            id="album"
+            type="text"
+            name="album"
+            placeholder="Album name"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="track">Track number</label>
+            <input
+              id="track"
+              type="text"
+              name="track"
+              placeholder="3 or 3/10"
+              autocomplete="off"
+            />
+          </div>
+          <div class="field">
+            <label for="genre">Genre</label>
+            <input
+              id="genre"
+              type="text"
+              name="genre"
+              placeholder="Jazz Rock"
+              autocomplete="off"
+            />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="cover"
+            >Cover art <span class="hint">(optional)</span></label
+          >
+          <input
+            id="cover"
+            type="file"
+            name="cover"
+            accept="image/jpeg,image/png"
+          />
+        </div>
+
+        <button type="submit">Write tags</button>
       </form>
       <p class="status" id="status"></p>
-      <a class="download-link" id="download-link">Download tagged MP3</a>
+      <a class="download-link" id="download-link">Download tagged file</a>
     </div>
     <script type="module">
       import { ID3Writer } from "https://cdn.jsdelivr.net/npm/browser-id3-writer@6.4.0/+esm";
+      import { WaveFile } from "https://cdn.jsdelivr.net/npm/wavefile@11.0.0/+esm";
 
       const form = document.getElementById("edit-form");
       const statusEl = document.getElementById("status");
@@ -131,67 +251,189 @@
         return str.replace(/[\\/:*?"<>|]/g, "").trim();
       }
 
+      function detectFormat(file) {
+        const name = file.name.toLowerCase();
+        if (name.endsWith(".mp3") || file.type === "audio/mpeg") return "mp3";
+        if (
+          name.endsWith(".wav") ||
+          file.type === "audio/wav" ||
+          file.type === "audio/wave" ||
+          file.type === "audio/x-wav"
+        ) {
+          return "wav";
+        }
+        return null;
+      }
+
+      function writeMp3Tags({
+        songBuffer,
+        title,
+        artist,
+        album,
+        track,
+        genre,
+        coverBuffer,
+      }) {
+        const writer = new ID3Writer(songBuffer);
+        if (title) writer.setFrame("TIT2", title);
+        if (artist) writer.setFrame("TPE1", [artist]);
+        if (album) writer.setFrame("TALB", album);
+        if (track) writer.setFrame("TRCK", track);
+        if (genre) writer.setFrame("TCON", [genre]);
+        if (coverBuffer) {
+          writer.setFrame("APIC", {
+            type: 3,
+            data: coverBuffer,
+            description: "Cover",
+          });
+        }
+        writer.addTag();
+        return {
+          blob: writer.getBlob(),
+          mime: "audio/mpeg",
+          ext: "mp3",
+          label: "ID3v2.3",
+        };
+      }
+
+      function writeWavTags({
+        songBuffer,
+        title,
+        artist,
+        album,
+        track,
+        genre,
+      }) {
+        const wav = new WaveFile(new Uint8Array(songBuffer));
+        // RIFF INFO tags (common mapping for WAV metadata)
+        if (title) wav.setTag("INAM", title);
+        if (artist) wav.setTag("IART", artist);
+        if (album) wav.setTag("IPRD", album);
+        if (track) wav.setTag("ITRK", track);
+        if (genre) wav.setTag("IGNR", genre);
+
+        const bytes = wav.toBuffer();
+        return {
+          blob: new Blob([bytes], { type: "audio/wav" }),
+          mime: "audio/wav",
+          ext: "wav",
+          label: "RIFF INFO",
+        };
+      }
+
+      /**
+       * Write metadata for MP3 (ID3v2) or WAV (RIFF INFO).
+       * Same field shape: title, artist, album, track, genre, cover.
+       */
+      async function writeTags({
+        file,
+        songBuffer,
+        title = "",
+        artist = "",
+        album = "",
+        track = "",
+        genre = "",
+        coverBuffer = null,
+      }) {
+        const format = detectFormat(file);
+        if (format === "mp3") {
+          return writeMp3Tags({
+            songBuffer,
+            title,
+            artist,
+            album,
+            track,
+            genre,
+            coverBuffer,
+          });
+        }
+        if (format === "wav") {
+          return writeWavTags({
+            songBuffer,
+            title,
+            artist,
+            album,
+            track,
+            genre,
+          });
+        }
+        throw new Error("Unsupported format. Use .mp3 or .wav.");
+      }
+
+      function readForm() {
+        return {
+          file: form.querySelector("#file").files[0] || null,
+          title: form.querySelector("#title").value.trim(),
+          artist: form.querySelector("#artist").value.trim(),
+          album: form.querySelector("#album").value.trim(),
+          track: form.querySelector("#track").value.trim(),
+          genre: form.querySelector("#genre").value.trim(),
+          cover: form.querySelector("#cover").files[0] || null,
+        };
+      }
+
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
 
-        const file = form.querySelector("input[name='file']").files[0];
-        const title = form.querySelector("input[name='title']").value.trim();
-        const artist = form.querySelector("input[name='artist']").value.trim();
-        const album = form.querySelector("input[name='album']").value.trim();
-        const tracknumber = form
-          .querySelector("input[name='tracknumber']")
-          .value.trim();
-        const genre = form.querySelector("input[name='genre']").value.trim();
-        const cover = form.querySelector("input[name='cover']").files[0];
+        const { file, title, artist, album, track, genre, cover } = readForm();
 
         if (!file) {
-          setStatus("Choose an MP3 file first.", "err");
+          setStatus("Choose an audio file first.", "err");
           return;
         }
 
-        if (!title && !artist && !album && !tracknumber && !genre && !cover) {
-          setStatus("Fill in at least one tag field.", "err");
+        const format = detectFormat(file);
+        if (!format) {
+          setStatus("Unsupported format. Use .mp3 or .wav.", "err");
+          return;
+        }
+
+        if (!title && !artist && !album && !track && !genre && !(cover && format === "mp3")) {
+          setStatus("Fill in at least one metadata field.", "err");
           return;
         }
 
         submitBtn.disabled = true;
         downloadLink.style.display = "none";
-        setStatus("Writing ID3v2 tags…");
+        setStatus(
+          format === "mp3" ? "Writing ID3v2 tags…" : "Writing RIFF INFO tags…"
+        );
 
         try {
           const songBuffer = await file.arrayBuffer();
-          const writer = new ID3Writer(songBuffer);
+          const coverBuffer =
+            cover && format === "mp3" ? await cover.arrayBuffer() : null;
 
-          if (title) writer.setFrame("TIT2", title);
-          if (artist) writer.setFrame("TPE1", [artist]);
-          if (album) writer.setFrame("TALB", album);
-          if (tracknumber) writer.setFrame("TRCK", tracknumber);
-          if (genre) writer.setFrame("TCON", [genre]);
-
-          if (cover) {
-            const coverBuffer = await cover.arrayBuffer();
-            writer.setFrame("APIC", {
-              type: 3,
-              data: coverBuffer,
-              description: "Cover",
-            });
-          }
-
-          writer.addTag();
+          const result = await writeTags({
+            file,
+            songBuffer,
+            title,
+            artist,
+            album,
+            track,
+            genre,
+            coverBuffer,
+          });
 
           if (downloadUrl) URL.revokeObjectURL(downloadUrl);
-          downloadUrl = writer.getURL();
+          downloadUrl = URL.createObjectURL(result.blob);
 
+          const baseExt = new RegExp("\\." + result.ext + "$", "i");
           const outName =
             artist && title
-              ? `${safeName(artist)} - ${safeName(title)}.mp3`
-              : file.name.replace(/\.mp3$/i, "") + " (tagged).mp3";
+              ? `${safeName(artist)} - ${safeName(title)}.${result.ext}`
+              : file.name.replace(baseExt, "") + ` (tagged).${result.ext}`;
 
           downloadLink.href = downloadUrl;
           downloadLink.download = outName;
           downloadLink.textContent = `Download "${outName}"`;
           downloadLink.style.display = "block";
-          setStatus("Done — tags written (ID3v2.3).", "ok");
+
+          let msg = `Done — tags written (${result.label}).`;
+          if (format === "wav" && cover) {
+            msg += " Cover art is skipped for WAV (use MP3 for embedded art).";
+          }
+          setStatus(msg, "ok");
         } catch (err) {
           console.error(err);
           setStatus(err.message || "Could not write tags.", "err");
