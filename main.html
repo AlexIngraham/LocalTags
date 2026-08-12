@@ -129,6 +129,37 @@
       .status.err {
         color: #c62828;
       }
+      .progress {
+        display: none;
+        margin-top: 10px;
+        width: 100%;
+      }
+      .progress.visible {
+        display: block;
+      }
+      .progress-track {
+        width: 100%;
+        height: 8px;
+        background: #ececec;
+        border-radius: 999px;
+        overflow: hidden;
+        container-type: inline-size;
+      }
+      .progress-fill {
+        height: 100%;
+        width: 0%;
+        border-radius: 999px;
+        background-image: linear-gradient(90deg, #e53935 0%, #43a047 100%);
+        background-size: 100cqw 100%;
+        background-repeat: no-repeat;
+        transition: width 0.12s ease-out;
+      }
+      .progress-label {
+        margin-top: 6px;
+        font-size: 12px;
+        color: #666;
+        text-align: center;
+      }
       .download-link {
         display: none;
         margin-top: 10px;
@@ -152,7 +183,7 @@
             accept="audio/mpeg,audio/wav,audio/wave,audio/x-wav,.mp3,.wav"
             required
           />
-          <span class="hint">MP3 (ID3v2) or WAV (RIFF INFO)</span>
+          <span class="hint">MP3 or WAV — WAV is converted to MP3 for Spotify</span>
         </div>
 
         <div class="divider" aria-hidden="true"></div>
@@ -228,23 +259,55 @@
         <button type="submit">Write tags</button>
       </form>
       <p class="status" id="status"></p>
-      <a class="download-link" id="download-link">Download tagged file</a>
+      <div
+        class="progress"
+        id="progress"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="0"
+        aria-hidden="true"
+      >
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div class="progress-label" id="progress-label">0%</div>
+      </div>
+      <a class="download-link" id="download-link">Download tagged MP3</a>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
     <script type="module">
       import { ID3Writer } from "https://cdn.jsdelivr.net/npm/browser-id3-writer@6.4.0/+esm";
-      import { WaveFile } from "https://cdn.jsdelivr.net/npm/wavefile@11.0.0/+esm";
 
       const form = document.getElementById("edit-form");
       const statusEl = document.getElementById("status");
+      const progressEl = document.getElementById("progress");
+      const progressFill = document.getElementById("progress-fill");
+      const progressLabel = document.getElementById("progress-label");
       const downloadLink = document.getElementById("download-link");
       const submitBtn = form.querySelector('button[type="submit"]');
+      const MP3_BITRATE = 192;
 
       let downloadUrl = null;
+      let audioCtx = null;
 
       function setStatus(text, kind) {
         statusEl.textContent = text || "";
         statusEl.classList.remove("ok", "err");
         if (kind) statusEl.classList.add(kind);
+      }
+
+      function setProgress(ratio) {
+        const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+        progressFill.style.width = pct + "%";
+        progressLabel.textContent = pct + "%";
+        progressEl.setAttribute("aria-valuenow", String(pct));
+      }
+
+      function showProgress(show) {
+        progressEl.classList.toggle("visible", show);
+        progressEl.setAttribute("aria-hidden", show ? "false" : "true");
+        if (!show) setProgress(0);
       }
 
       function safeName(str) {
@@ -263,6 +326,77 @@
           return "wav";
         }
         return null;
+      }
+
+      function floatTo16BitPCM(float32) {
+        const out = new Int16Array(float32.length);
+        for (let i = 0; i < float32.length; i++) {
+          const s = Math.max(-1, Math.min(1, float32[i]));
+          out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        return out;
+      }
+
+      function yieldToUi() {
+        return new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      /** Decode WAV and encode to MP3 (192 kbps) with lamejs. */
+      async function wavToMp3(arrayBuffer, onProgress) {
+        if (!window.lamejs || !window.lamejs.Mp3Encoder) {
+          throw new Error(
+            "MP3 encoder failed to load. Check your network and refresh.",
+          );
+        }
+
+        audioCtx =
+          audioCtx ||
+          new (window.AudioContext || window.webkitAudioContext)();
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+        const channels = Math.min(2, audioBuffer.numberOfChannels);
+        const sampleRate = audioBuffer.sampleRate;
+        const left = floatTo16BitPCM(audioBuffer.getChannelData(0));
+        const right =
+          channels === 2
+            ? floatTo16BitPCM(audioBuffer.getChannelData(1))
+            : null;
+
+        const encoder = new lamejs.Mp3Encoder(channels, sampleRate, MP3_BITRATE);
+        const mp3Chunks = [];
+        const blockSize = 1152;
+        const total = left.length;
+
+        for (let i = 0; i < total; i += blockSize) {
+          const leftChunk = left.subarray(i, i + blockSize);
+          let mp3buf;
+          if (channels === 2) {
+            mp3buf = encoder.encodeBuffer(
+              leftChunk,
+              right.subarray(i, i + blockSize),
+            );
+          } else {
+            mp3buf = encoder.encodeBuffer(leftChunk);
+          }
+          if (mp3buf.length > 0) mp3Chunks.push(mp3buf);
+
+          if (i % (blockSize * 40) === 0) {
+            if (onProgress) onProgress(Math.min(1, i / total));
+            await yieldToUi();
+          }
+        }
+
+        const end = encoder.flush();
+        if (end.length > 0) mp3Chunks.push(end);
+        if (onProgress) onProgress(1);
+
+        const totalLength = mp3Chunks.reduce((n, c) => n + c.length, 0);
+        const mp3 = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of mp3Chunks) {
+          mp3.set(chunk, offset);
+          offset += chunk.length;
+        }
+        return mp3.buffer;
       }
 
       function writeMp3Tags({
@@ -288,76 +422,7 @@
           });
         }
         writer.addTag();
-        return {
-          blob: writer.getBlob(),
-          mime: "audio/mpeg",
-          ext: "mp3",
-          label: "ID3v2.3",
-        };
-      }
-
-      function writeWavTags({
-        songBuffer,
-        title,
-        artist,
-        album,
-        track,
-        genre,
-      }) {
-        const wav = new WaveFile(new Uint8Array(songBuffer));
-        // RIFF INFO tags (common mapping for WAV metadata)
-        if (title) wav.setTag("INAM", title);
-        if (artist) wav.setTag("IART", artist);
-        if (album) wav.setTag("IPRD", album);
-        if (track) wav.setTag("ITRK", track);
-        if (genre) wav.setTag("IGNR", genre);
-
-        const bytes = wav.toBuffer();
-        return {
-          blob: new Blob([bytes], { type: "audio/wav" }),
-          mime: "audio/wav",
-          ext: "wav",
-          label: "RIFF INFO",
-        };
-      }
-
-      /**
-       * Write metadata for MP3 (ID3v2) or WAV (RIFF INFO).
-       * Same field shape: title, artist, album, track, genre, cover.
-       */
-      async function writeTags({
-        file,
-        songBuffer,
-        title = "",
-        artist = "",
-        album = "",
-        track = "",
-        genre = "",
-        coverBuffer = null,
-      }) {
-        const format = detectFormat(file);
-        if (format === "mp3") {
-          return writeMp3Tags({
-            songBuffer,
-            title,
-            artist,
-            album,
-            track,
-            genre,
-            coverBuffer,
-          });
-        }
-        if (format === "wav") {
-          return writeWavTags({
-            songBuffer,
-            title,
-            artist,
-            album,
-            track,
-            genre,
-          });
-        }
-        throw new Error("Unsupported format. Use .mp3 or .wav.");
+        return writer.getBlob();
       }
 
       function readForm() {
@@ -388,24 +453,31 @@
           return;
         }
 
-        if (!title && !artist && !album && !track && !genre && !(cover && format === "mp3")) {
+        if (!title && !artist && !album && !track && !genre && !cover) {
           setStatus("Fill in at least one metadata field.", "err");
           return;
         }
 
         submitBtn.disabled = true;
         downloadLink.style.display = "none";
-        setStatus(
-          format === "mp3" ? "Writing ID3v2 tags…" : "Writing RIFF INFO tags…"
-        );
+        showProgress(false);
 
         try {
-          const songBuffer = await file.arrayBuffer();
-          const coverBuffer =
-            cover && format === "mp3" ? await cover.arrayBuffer() : null;
+          let songBuffer = await file.arrayBuffer();
 
-          const result = await writeTags({
-            file,
+          if (format === "wav") {
+            setStatus("Converting WAV → MP3");
+            showProgress(true);
+            setProgress(0);
+            songBuffer = await wavToMp3(songBuffer, (p) => {
+              setProgress(p);
+            });
+            showProgress(false);
+          }
+
+          setStatus("Writing ID3v2 tags…");
+          const coverBuffer = cover ? await cover.arrayBuffer() : null;
+          const blob = writeMp3Tags({
             songBuffer,
             title,
             artist,
@@ -416,28 +488,29 @@
           });
 
           if (downloadUrl) URL.revokeObjectURL(downloadUrl);
-          downloadUrl = URL.createObjectURL(result.blob);
+          downloadUrl = URL.createObjectURL(blob);
 
-          const baseExt = new RegExp("\\." + result.ext + "$", "i");
           const outName =
             artist && title
-              ? `${safeName(artist)} - ${safeName(title)}.${result.ext}`
-              : file.name.replace(baseExt, "") + ` (tagged).${result.ext}`;
+              ? `${safeName(artist)} - ${safeName(title)}.mp3`
+              : file.name.replace(/\.(mp3|wav)$/i, "") + " (tagged).mp3";
 
           downloadLink.href = downloadUrl;
           downloadLink.download = outName;
           downloadLink.textContent = `Download "${outName}"`;
           downloadLink.style.display = "block";
 
-          let msg = `Done — tags written (${result.label}).`;
-          if (format === "wav" && cover) {
-            msg += " Cover art is skipped for WAV (use MP3 for embedded art).";
-          }
-          setStatus(msg, "ok");
+          setStatus(
+            format === "wav"
+              ? "Done — converted to MP3 and tagged (ID3v2.3)."
+              : "Done — tags written (ID3v2.3).",
+            "ok",
+          );
         } catch (err) {
           console.error(err);
-          setStatus(err.message || "Could not write tags.", "err");
+          setStatus(err.message || "Could not process file.", "err");
         } finally {
+          showProgress(false);
           submitBtn.disabled = false;
         }
       });
