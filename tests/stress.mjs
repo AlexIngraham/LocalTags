@@ -89,8 +89,50 @@ function sniffContainer(arrayBuffer) {
   if (asciiAt(b, 0, 4) === "OggS") return "ogg";
   if (asciiAt(b, 4, 4) === "ftyp") return "m4a";
   if (asciiAt(b, 0, 3) === "ID3") return "mp3";
-  if (b[0] === 0xff && (b[1] & 0xe0) === 0xe0) return "mp3";
+  if (isMp3FrameHeader(b, 0)) return "mp3";
   return null;
+}
+
+function isMp3FrameHeader(bytes, offset) {
+  if (offset + 3 >= bytes.length) return false;
+  const b1 = bytes[offset + 1];
+  const b2 = bytes[offset + 2];
+  const version = (b1 >> 3) & 0x03;
+  const layer = (b1 >> 1) & 0x03;
+  const bitrate = (b2 >> 4) & 0x0f;
+  const sampleRate = (b2 >> 2) & 0x03;
+  return (
+    bytes[offset] === 0xff &&
+    (b1 & 0xe0) === 0xe0 &&
+    version !== 0x01 &&
+    layer !== 0x00 &&
+    bitrate !== 0x00 &&
+    bitrate !== 0x0f &&
+    sampleRate !== 0x03
+  );
+}
+
+function hasMp3AudioFrame(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  let start = 0;
+
+  if (bytes.length >= 10 && asciiAt(bytes, 0, 3) === "ID3") {
+    const sizeBytes = bytes.subarray(6, 10);
+    if ([...sizeBytes].every((value) => value < 128)) {
+      start =
+        10 +
+        (sizeBytes[0] << 21) +
+        (sizeBytes[1] << 14) +
+        (sizeBytes[2] << 7) +
+        sizeBytes[3];
+    }
+  }
+
+  const limit = Math.min(bytes.length - 3, start + 1_000_000);
+  for (let i = Math.min(start, bytes.length); i < limit; i += 1) {
+    if (isMp3FrameHeader(bytes, i)) return true;
+  }
+  return false;
 }
 
 function bufferHasAscii(bytes, ascii) {
@@ -396,6 +438,18 @@ assert("sniff OggS", sniffContainer(new TextEncoder().encode("OggS........").buf
 assert("sniff FORM/AIFF", sniffContainer(new TextEncoder().encode("FORM....AIFF").buffer) === "aiff");
 assert("empty buffer sniff null", sniffContainer(new ArrayBuffer(8)) === null);
 assert(
+  "MP3 frame header sniff",
+  sniffContainer(Uint8Array.from([0xff, 0xfb, 0x90, 0x64, 0, 0, 0, 0, 0, 0, 0, 0]).buffer) === "mp3",
+);
+assert(
+  "AAC ADTS header is not misread as MP3",
+  sniffContainer(Uint8Array.from([0xff, 0xf1, 0x50, 0x80, 0, 0, 0, 0, 0, 0, 0, 0]).buffer) === null,
+);
+assert(
+  "junk has no MP3 audio frame",
+  hasMp3AudioFrame(new TextEncoder().encode("not an mp3 file at all").buffer) === false,
+);
+assert(
   "double extension last wins",
   detectFormat(fakeFile("track.wav.mp3"), new ArrayBuffer(0)) === "mp3",
 );
@@ -438,6 +492,7 @@ console.log("\n== lamejs encode ==");
   const left = sinePcm(44100 * 0.2);
   const mp3 = encodePcmToMp3(44100, 1, left);
   assert("mono 44100 produces bytes", mp3.byteLength > 200);
+  assert("encoded output has an MP3 frame", hasMp3AudioFrame(mp3));
   save("mono.mp3", mp3);
 
   const L = sinePcm(1152 * 3);
