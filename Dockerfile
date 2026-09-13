@@ -7,5 +7,6 @@ COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY main.html /usr/share/nginx/html/index.html
 COPY main.html /usr/share/nginx/html/main.html
 COPY style.css /usr/share/nginx/html/style.css
+COPY app.js metadata.js /usr/share/nginx/html/
 
 EXPOSE 10000

@@ -1,6 +1,14 @@
 {
+  "scripts": {
+    "test": "npm run test:metadata && npm run test:workflow",
+    "test:metadata": "node --test metadata.mjs",
+    "test:workflow": "node workflow.mjs"
+  },
   "dependencies": {
     "browser-id3-writer": "^6.4.0",
     "lamejs": "^1.2.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
   }
 }
