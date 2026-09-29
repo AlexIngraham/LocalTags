@@ -1,17 +1,68 @@
 import { readSourceMetadata } from "./metadata.js";
 import { createZip, uniqueFilename } from "./zip.js";
+import {
+  FIELDS,
+  applyPatch,
+  buildPatch,
+  summarize,
+  summarizeCovers,
+  validTrack,
+} from "./edits.js";
 
-const FIELD_LABELS = { track: "Track number", title: "Title", artist: "Artist", album: "Album", albumArtist: "Album artist", genre: "Genre" };
+const FIELD_KEYS = FIELDS.map(({ key }) => key);
+const BULK_KEYS = [...FIELD_KEYS, "cover"];
+const LABELS = {
+  ...Object.fromEntries(FIELDS.map(({ key, label }) => [key, label])),
+  cover: "Cover art",
+};
+const TEXT_MODES = [
+  ["keep", "Keep existing"],
+  ["set", "Set to"],
+  ["clear", "Clear"],
+];
+const TRACK_MODES = [
+  ["keep", "Keep existing"],
+  ["set", "Set to"],
+  ["sequence", "Number in order from"],
+  ["clear", "Clear"],
+];
+const PENCIL =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2z"/></svg>';
+
+const plural = (count, noun = "track") =>
+  `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+function listLabels(keys) {
+  const labels = keys.map((key) => LABELS[key]);
+  return labels.length > 1
+    ? `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`
+    : labels[0];
+}
+
+function coverSummary(current, count) {
+  if (current.kind === "none") return "Select tracks to see artwork";
+  if (current.kind === "empty") return "No artwork";
+  if (current.kind === "same")
+    return count === 1 ? "Current artwork" : `Same artwork on all ${count}`;
+  return `${current.withArt} of ${current.total} have artwork · each keeps its own`;
+}
 
 export function createBatchEditor(host) {
   const root = document.getElementById("batch-editor");
   const list = document.getElementById("track-list");
+  const head = document.getElementById("track-head");
+  const tableWrap = document.getElementById("track-table-wrap");
+  const emptyNote = document.getElementById("album-empty");
   const summary = document.getElementById("batch-summary");
   const albumDownload = document.getElementById("album-download");
+  const bulkFields = document.getElementById("bulk-fields");
+  const bulkSelection = document.getElementById("bulk-selection");
+  const bulkPlan = document.getElementById("bulk-plan");
   const bulkMessage = document.getElementById("bulk-message");
+  const applyButton = document.getElementById("apply-selected");
   const sharedCoverInput = document.getElementById("album-cover");
   const sharedPreview = document.getElementById("album-cover-preview");
-  const bulkKeys = ["album", "albumArtist", "genre"];
+  const coverNote = document.getElementById("bulk-cover-note");
   const shared = { cover: null, url: null, version: 0, pending: false };
   let tracks = [];
   let nextId = 0;
@@ -22,14 +73,62 @@ export function createBatchEditor(host) {
   let currentTrack = null;
   let processingIndex = 0;
   let workers = 0;
+  let anchor = null;
   const jobs = [];
   const retired = new Map();
   const alive = (track) => tracks.includes(track);
-  const reading = () => tracks.some((track) => track.pending || track.coverPending);
+  const reading = () =>
+    tracks.some((track) => track.pending || track.coverPending);
+  const selection = () => tracks.filter((track) => track.selected);
+  const trackFor = (element) =>
+    tracks.find(
+      (entry) => entry.id === element.closest(".track-row")?.dataset.trackId,
+    );
+  const modeOf = (key) => document.getElementById(`bulk-mode-${key}`);
+  const inputOf = (key) => document.getElementById(`bulk-${key}`);
+
+  bulkFields.insertAdjacentHTML(
+    "afterbegin",
+    FIELDS.map(
+      ({ key, label }) => `
+    <div class="bulk-row" data-bulk-row="${key}">
+      <label class="bulk-label" for="bulk-mode-${key}">${label}</label>
+      <select id="bulk-mode-${key}" data-bulk-mode="${key}">${(key === "track"
+        ? TRACK_MODES
+        : TEXT_MODES
+      )
+        .map(([value, text]) => `<option value="${value}">${text}</option>`)
+        .join("")}</select>
+      <input id="bulk-${key}" data-bulk-value="${key}" type="text" autocomplete="off" aria-describedby="bulk-error-${key}" />
+      <p class="bulk-error" id="bulk-error-${key}" hidden></p>
+    </div>`,
+    ).join(""),
+  );
+  head.innerHTML = `<tr>
+    <th scope="col" class="col-select"><input id="select-all-tracks" type="checkbox" aria-label="Select all tracks" /></th>
+    ${[...FIELDS, { key: "cover", label: "Cover art" }]
+      .map(
+        ({ key, label, column = label }) => `
+    <th scope="col" class="col-${key}"><span class="column-heading"><span id="col-${key}">${column}</span>
+      <button type="button" class="column-edit" data-bulk-target="${key}" title="Set ${label} for selected tracks"
+        aria-label="Set ${label} for selected tracks">${PENCIL}</button></span></th>`,
+      )
+      .join("")}
+    <th scope="col" class="col-file">Filename</th>
+    <th scope="col" class="col-status">Status</th>
+    <th scope="col" class="col-actions"><span class="visually-hidden">Order and removal</span></th>
+  </tr>`;
+  const selectAll = document.getElementById("select-all-tracks");
 
   function retire(url) {
     if (!url) return;
-    retired.set(url, setTimeout(() => { URL.revokeObjectURL(url); retired.delete(url); }, 60_000));
+    retired.set(
+      url,
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        retired.delete(url);
+      }, 60_000),
+    );
   }
 
   function clearArchive() {
@@ -48,54 +147,72 @@ export function createBatchEditor(host) {
     track.error = track.loadError || "";
   }
 
-  function createCard(track) {
-    const card = document.createElement("article");
-    card.className = "track-card";
-    card.dataset.trackId = track.id;
-    card.innerHTML = `
-      <div class="track-card-heading">
-        <label class="track-selection"><input type="checkbox" data-select /><span class="track-filename"></span></label>
-        <span class="track-format"></span><span class="track-status" role="status"></span>
-      </div>
-      <div class="track-fields">${Object.entries(FIELD_LABELS).map(([key, label]) => `
-        <div class="field"><label for="${track.id}-${key}">${label}</label>
-        <input id="${track.id}-${key}" data-field="${key}" type="text" autocomplete="off" /></div>`).join("")}</div>
-      <div class="track-card-footer">
-        <img class="track-cover" alt="Track artwork" hidden />
-        <label class="quiet-button track-cover-picker" for="${track.id}-cover">Choose artwork</label>
-        <input id="${track.id}-cover" data-cover type="file" class="visually-hidden-file" accept="image/jpeg,image/png,image/gif,image/webp" />
-        <button type="button" class="text-button" data-action="cover-remove">Clear artwork</button>
+  function createRow(track) {
+    const row = document.createElement("tr");
+    const name = `${track.id}-name`;
+    row.className = "track-row";
+    row.dataset.trackId = track.id;
+    row.innerHTML = `
+      <td class="col-select"><input type="checkbox" data-select /></td>
+      ${FIELD_KEYS.map(
+        (key) => `<td class="col-${key}">
+        <input class="cell-input" data-field="${key}" type="text" autocomplete="off" aria-labelledby="col-${key} ${name}" /></td>`,
+      ).join("")}
+      <td class="col-cover"><div class="cell-cover">
+        <label class="track-cover-picker" for="${track.id}-cover"><img class="track-cover" alt="Track artwork" hidden /></label>
+        <input id="${track.id}-cover" data-cover type="file" class="visually-hidden-file" aria-labelledby="col-cover ${name}"
+          accept="image/jpeg,image/png,image/gif,image/webp" />
+        <button type="button" class="cell-button" data-action="cover-remove" aria-label="Clear artwork">Clear</button>
+      </div></td>
+      <td class="col-file"><span class="track-filename" id="${name}"></span><span class="track-format"></span></td>
+      <td class="col-status"><span class="track-status" role="status"></span>
         <a class="download-link track-download" hidden>Download MP3</a>
-        <div class="track-order-actions">
-          <button type="button" class="quiet-button" data-action="up" aria-label="Move track up">↑</button>
-          <button type="button" class="quiet-button" data-action="down" aria-label="Move track down">↓</button>
-          <button type="button" class="quiet-button" data-action="remove">Remove track</button>
-        </div>
-      </div>
-      <p class="field-message track-error" role="alert" hidden></p>`;
-    return card;
+        <p class="track-error" role="alert" hidden></p></td>
+      <td class="col-actions"><div class="row-actions">
+        <button type="button" class="cell-button" data-action="up" aria-label="Move track up">↑</button>
+        <button type="button" class="cell-button" data-action="down" aria-label="Move track down">↓</button>
+        <button type="button" class="cell-button" data-action="remove" aria-label="Remove track">✕</button>
+      </div></td>`;
+    row
+      .querySelector("[data-select]")
+      .setAttribute("aria-label", `Select ${track.file.name}`);
+    return row;
   }
 
   function renderTrack(track) {
-    const card = track.card;
-    card.querySelector(".track-filename").textContent = track.file.name;
-    card.querySelector(".track-format").textContent = track.format ? host.formatLabel(track.format) : "Checking format";
-    card.querySelector(".track-status").textContent = track.coverPending ? "Reading artwork" : track.status;
-    card.dataset.status = track.status.toLowerCase();
-    card.querySelector("[data-select]").checked = track.selected;
-    for (const [key, value] of Object.entries(track.values)) {
-      const input = card.querySelector(`[data-field="${key}"]`);
+    const row = track.row;
+    const filename = row.querySelector(".track-filename");
+    filename.textContent = track.file.name;
+    filename.title = track.file.name;
+    row.querySelector(".track-format").textContent = track.format
+      ? host.formatLabel(track.format)
+      : "Checking";
+    row.querySelector(".track-status").textContent = track.coverPending
+      ? "Reading artwork"
+      : track.status;
+    row.dataset.status = track.status.toLowerCase();
+    row.classList.toggle("is-selected", track.selected);
+    row.querySelector("[data-select]").checked = track.selected;
+    for (const key of FIELD_KEYS) {
+      const input = row.querySelector(`[data-field="${key}"]`);
+      const value = track.values[key];
       if (input.value !== value) input.value = value;
-      if (key === "track") input.setAttribute("aria-invalid", String(!host.validTrack(value)));
+      if (key === "track")
+        input.setAttribute("aria-invalid", String(!validTrack(value)));
     }
-    const image = card.querySelector(".track-cover");
+    const image = row.querySelector(".track-cover");
     image.hidden = !track.coverUrl;
     if (track.coverUrl) image.src = track.coverUrl;
     else image.removeAttribute("src");
-    const error = card.querySelector(".track-error");
+    row.querySelector(".track-cover-picker").title = track.coverUrl
+      ? "Replace artwork"
+      : "Choose artwork";
+    row.querySelector('[data-action="cover-remove"]').hidden =
+      !track.coverUrl && !track.coverPending;
+    const error = row.querySelector(".track-error");
     error.textContent = track.error || track.coverError || "";
     error.hidden = !error.textContent;
-    const link = card.querySelector(".track-download");
+    const link = row.querySelector(".track-download");
     link.hidden = !track.result;
     if (track.result) {
       link.href = track.result.url;
@@ -103,17 +220,192 @@ export function createBatchEditor(host) {
     } else link.removeAttribute("href");
   }
 
+  function renderBulk() {
+    const selected = selection();
+    const count = selected.length;
+    bulkSelection.textContent = count
+      ? `${count} of ${plural(tracks.length)} selected`
+      : "No tracks selected";
+    for (const { key, label } of FIELDS) {
+      const mode = modeOf(key).value;
+      const input = inputOf(key);
+      input.closest(".bulk-row").dataset.mode = mode;
+      input.disabled = busy || mode === "clear";
+      input.setAttribute(
+        "aria-label",
+        mode === "sequence"
+          ? "First track number"
+          : `${label} for selected tracks`,
+      );
+      if (mode === "keep") {
+        // Preview only: a shared value is shown, but a mixed one is never
+        // replaced by any single track's value.
+        const current = summarize(selected.map((track) => track.values[key]));
+        const preview = current.kind === "same" ? current.value : "";
+        if (input.value !== preview) input.value = preview;
+        input.placeholder = {
+          none: "Select tracks to see values",
+          empty: "No value",
+          mixed: "Mixed · each track keeps its own",
+          same: "",
+        }[current.kind];
+      } else if (mode === "clear") {
+        input.value = "";
+        input.placeholder = count
+          ? `Will be cleared on ${plural(count)}`
+          : "Will be cleared";
+      } else
+        input.placeholder =
+          mode === "sequence" ? "1" : `New ${label.toLowerCase()}`;
+    }
+    const coverMode = modeOf("cover").value;
+    let preview = null;
+    sharedCoverInput.closest(".bulk-row").dataset.mode = coverMode;
+    if (coverMode === "keep") {
+      const current = summarizeCovers(selected.map((track) => track.cover));
+      if (current.kind === "same")
+        preview = selected.find(
+          (track) => track.cover === current.cover,
+        ).coverUrl;
+      coverNote.textContent = coverSummary(current, count);
+    } else if (coverMode === "set") {
+      preview = shared.url;
+      coverNote.textContent = shared.cover
+        ? "New image"
+        : "JPEG, PNG, GIF or WebP · up to 10 MB";
+    } else
+      coverNote.textContent = count
+        ? `Will be removed from ${plural(count)}`
+        : "Will be removed";
+    sharedPreview.hidden = !preview;
+    if (!preview) sharedPreview.removeAttribute("src");
+    else if (sharedPreview.getAttribute("src") !== preview)
+      sharedPreview.src = preview;
+    const changing = BULK_KEYS.filter((key) => modeOf(key).value !== "keep");
+    applyButton.textContent = count
+      ? `Apply to ${plural(count, "selected track")}`
+      : "Apply to selected tracks";
+    applyButton.disabled = busy || shared.pending || !count || !changing.length;
+    bulkPlan.textContent = !count
+      ? "Select tracks in the table below to edit them together."
+      : !changing.length
+        ? "Choose Set or Clear on only the fields you want to change."
+        : `Changes ${listLabels(changing)} on ${plural(count)}. Everything else stays as is.`;
+  }
+
   function render() {
     tracks.forEach((track, index) => {
       renderTrack(track);
-      if (list.children[index] !== track.card) list.insertBefore(track.card, list.children[index] || null);
+      if (list.children[index] !== track.row)
+        list.insertBefore(track.row, list.children[index] || null);
     });
-    const selected = tracks.filter((track) => track.selected).length;
-    summary.textContent = `${tracks.length} tracks · ${selected} selected`;
-    const selectAll = document.getElementById("select-all-tracks");
+    const selected = selection().length;
+    summary.textContent = `${plural(tracks.length)} · ${selected} selected`;
+    tableWrap.hidden = !tracks.length;
+    emptyNote.hidden = Boolean(tracks.length);
     selectAll.checked = tracks.length > 0 && selected === tracks.length;
     selectAll.indeterminate = selected > 0 && selected < tracks.length;
     host.updateActions();
+  }
+
+  function showError(key, message = "") {
+    const error = document.getElementById(`bulk-error-${key}`);
+    error.textContent = message;
+    error.hidden = !message;
+    (key === "cover" ? modeOf(key) : inputOf(key)).setAttribute(
+      "aria-invalid",
+      String(Boolean(message)),
+    );
+  }
+
+  function resetBulk() {
+    for (const key of BULK_KEYS) {
+      modeOf(key).value = "keep";
+      showError(key);
+    }
+  }
+
+  function replaceCover(track, file) {
+    // The shared file was already validated. A fresh preview URL belongs to
+    // each track, so removing one track cannot revoke another track's art.
+    track.coverVersion++;
+    track.coverPending = false;
+    track.coverEdited = true;
+    track.coverError = "";
+    if (track.coverUrl) URL.revokeObjectURL(track.coverUrl);
+    track.cover = file;
+    track.coverUrl = file ? URL.createObjectURL(file) : null;
+  }
+
+  function applyBulk() {
+    if (busy || shared.pending) return;
+    const targets = selection();
+    const controls = Object.fromEntries(
+      BULK_KEYS.map((key) => [
+        key,
+        {
+          mode: modeOf(key).value,
+          value: key === "cover" ? shared.cover : inputOf(key).value,
+        },
+      ]),
+    );
+    const { patch, errors } = buildPatch(controls, targets.length);
+    const invalid = Object.keys(errors);
+    const keys = Object.keys(patch);
+    BULK_KEYS.forEach((key) => showError(key, errors[key]));
+    if (!targets.length || invalid.length || !keys.length) {
+      bulkMessage.textContent = !targets.length
+        ? "Select tracks first."
+        : invalid.length
+          ? `Nothing was changed. Fix ${listLabels(invalid)} first.`
+          : "Choose Set or Clear on at least one field.";
+      if (invalid.length)
+        (invalid[0] === "cover"
+          ? modeOf("cover")
+          : inputOf(invalid[0])
+        ).focus();
+      return;
+    }
+    for (const [track, next] of applyPatch(tracks, patch)) {
+      for (const key of FIELD_KEYS) if (patch[key]) track.edited.add(key);
+      track.values = next.values;
+      if (patch.cover) replaceCover(track, next.cover);
+      invalidate(track);
+    }
+    if (patch.track) orderVersion++;
+    // Starting fresh keeps a finished edit from being re-applied to the next selection.
+    resetBulk();
+    bulkMessage.textContent = `Updated ${listLabels(keys)} on ${plural(targets.length)}. Everything else was left as is.`;
+    render();
+  }
+
+  function openBulkField(key) {
+    if (busy) return;
+    const mode = modeOf(key);
+    if (mode.value === "keep") mode.value = "set";
+    showError(key);
+    renderBulk();
+    const row = mode.closest(".bulk-row");
+    row.classList.add("is-targeted");
+    row.addEventListener(
+      "animationend",
+      () => row.classList.remove("is-targeted"),
+      { once: true },
+    );
+    const target = key === "cover" ? sharedCoverInput : inputOf(key);
+    target.focus();
+    if (key !== "cover") target.select();
+  }
+
+  function select(track, selected, extend) {
+    const from = extend && alive(anchor) ? tracks.indexOf(anchor) : -1;
+    const to = tracks.indexOf(track);
+    if (from < 0) track.selected = selected;
+    else
+      for (let index = Math.min(from, to); index <= Math.max(from, to); index++)
+        tracks[index].selected = selected;
+    anchor = track;
+    render();
   }
 
   async function setCover(track, file, userEdit = true) {
@@ -133,7 +425,8 @@ export function createBatchEditor(host) {
       track.coverUrl = url;
       url = null;
     } catch (error) {
-      if (alive(track) && version === track.coverVersion) track.coverError = error.message;
+      if (alive(track) && version === track.coverVersion)
+        track.coverError = error.message;
     } finally {
       if (url) URL.revokeObjectURL(url);
       if (alive(track) && version === track.coverVersion) {
@@ -155,10 +448,11 @@ export function createBatchEditor(host) {
         // if a browser File read or an unexpected parser exception rejects.
         const source = await readSourceMetadata(track.file).catch(() => ({}));
         if (!alive(track)) return;
-        for (const key of Object.keys(FIELD_LABELS)) {
+        for (const key of FIELD_KEYS) {
           if (!track.edited.has(key)) track.values[key] = source[key] || "";
         }
-        if (source.cover && !track.coverEdited) await setCover(track, source.cover, false);
+        if (source.cover && !track.coverEdited)
+          await setCover(track, source.cover, false);
       }
       if (alive(track)) track.status = "Waiting";
     } catch (error) {
@@ -178,7 +472,10 @@ export function createBatchEditor(host) {
   function pump() {
     while (workers < 2 && jobs.length) {
       const job = jobs.shift();
-      if (!alive(job.track)) { job.resolve(); continue; }
+      if (!alive(job.track)) {
+        job.resolve();
+        continue;
+      }
       workers++;
       let released = false;
       const release = () => {
@@ -197,9 +494,14 @@ export function createBatchEditor(host) {
   }
 
   function compareTracks(a, b) {
-    const number = (track) => Number.parseInt(track.values.track, 10) || Infinity;
-    const left = number(a), right = number(b);
-    return (left === right ? 0 : left - right) || a.file.name.localeCompare(b.file.name, undefined, { numeric: true });
+    const number = (track) =>
+      Number.parseInt(track.values.track, 10) || Infinity;
+    const left = number(a),
+      right = number(b);
+    return (
+      (left === right ? 0 : left - right) ||
+      a.file.name.localeCompare(b.file.name, undefined, { numeric: true })
+    );
   }
 
   async function add(files, importMetadata, seed = null) {
@@ -213,17 +515,36 @@ export function createBatchEditor(host) {
     const pending = entries.map((file, index) => {
       const initial = seed && index === 0 ? seed : null;
       const track = {
-        id: `track-${++nextId}`, file, format: initial?.format || null,
-        values: Object.fromEntries(Object.keys(FIELD_LABELS).map((key) => [key, initial?.values[key] || ""])),
-        edited: new Set(initial?.edited || []), selected: false, pending: true,
-        status: "Waiting", loadError: "", error: "", coverError: "", result: null,
-        cover: initial?.cover || null, coverUrl: initial?.cover ? URL.createObjectURL(initial.cover) : null,
-        coverEdited: initial?.coverEdited || false, coverVersion: 0, coverPending: false,
+        id: `track-${++nextId}`,
+        file,
+        format: initial?.format || null,
+        values: Object.fromEntries(
+          FIELD_KEYS.map((key) => [key, initial?.values[key] || ""]),
+        ),
+        edited: new Set(initial?.edited || []),
+        selected: false,
+        pending: true,
+        status: "Waiting",
+        loadError: "",
+        error: "",
+        coverError: "",
+        result: null,
+        cover: initial?.cover || null,
+        coverUrl: initial?.cover ? URL.createObjectURL(initial.cover) : null,
+        coverEdited: initial?.coverEdited || false,
+        coverVersion: 0,
+        coverPending: false,
       };
-      track.card = createCard(track);
+      track.row = createRow(track);
       tracks.push(track);
       if (initial?.pendingCover) setCover(track, initial.pendingCover);
-      return new Promise((resolve) => jobs.push({ track, importMetadata: initial?.importMetadata ?? importMetadata, resolve }));
+      return new Promise((resolve) =>
+        jobs.push({
+          track,
+          importMetadata: initial?.importMetadata ?? importMetadata,
+          resolve,
+        }),
+      );
     });
     render();
     pump();
@@ -243,7 +564,7 @@ export function createBatchEditor(host) {
     if (track.coverUrl) URL.revokeObjectURL(track.coverUrl);
     tracks = tracks.filter((entry) => entry !== track);
     track.releaseRead?.();
-    track.card.remove();
+    track.row.remove();
     render();
   }
 
@@ -255,43 +576,9 @@ export function createBatchEditor(host) {
     shared.cover = null;
     if (shared.url) URL.revokeObjectURL(shared.url);
     shared.url = null;
-    sharedPreview.hidden = true;
-    sharedPreview.removeAttribute("src");
     sharedCoverInput.value = "";
-    bulkKeys.forEach((key) => { document.getElementById(`bulk-${key}`).value = ""; });
-    root.querySelectorAll("[data-bulk-use]").forEach((input) => { input.checked = false; });
+    resetBulk();
     bulkMessage.textContent = "";
-    render();
-  }
-
-  function applyBulk(selectedOnly) {
-    if (busy || shared.pending) return;
-    const targets = tracks.filter((track) => !selectedOnly || track.selected);
-    const keys = bulkKeys.filter((key) => document.getElementById(`use-${key}`).checked);
-    const useCover = document.getElementById("use-cover").checked;
-    if (!targets.length || (!keys.length && !useCover)) {
-      bulkMessage.textContent = !targets.length ? "Select tracks first." : "Choose which shared fields to apply.";
-      return;
-    }
-    for (const track of targets) {
-      for (const key of keys) {
-        track.edited.add(key);
-        track.values[key] = document.getElementById(`bulk-${key}`).value;
-      }
-      invalidate(track);
-      if (useCover) {
-        // The shared file was already validated. A fresh preview URL belongs to
-        // each track, so removing one track cannot revoke another track's art.
-        track.coverVersion++;
-        track.coverPending = false;
-        track.coverEdited = true;
-        track.coverError = "";
-        if (track.coverUrl) URL.revokeObjectURL(track.coverUrl);
-        track.cover = shared.cover;
-        track.coverUrl = shared.cover ? URL.createObjectURL(shared.cover) : null;
-      }
-    }
-    bulkMessage.textContent = `Shared details applied to ${targets.length} track${targets.length === 1 ? "" : "s"}.`;
     render();
   }
 
@@ -309,36 +596,69 @@ export function createBatchEditor(host) {
         processingIndex = index + 1;
         try {
           if (track.loadError) throw new Error(track.loadError);
-          if (!host.validTrack(track.values.track)) throw new Error("Use a track number from 1–9999, or track/total with total at least the track number.");
-          const values = Object.fromEntries(Object.entries(track.values).map(([key, value]) => [key, value.trim()]));
-          const blob = await host.processTrack({ file: track.file, values, cover: track.cover });
+          if (!validTrack(track.values.track))
+            throw new Error(
+              "Use a track number from 1–9999, or track/total with total at least the track number.",
+            );
+          const values = Object.fromEntries(
+            Object.entries(track.values).map(([key, value]) => [
+              key,
+              value.trim(),
+            ]),
+          );
+          const blob = await host.processTrack({
+            file: track.file,
+            values,
+            cover: track.cover,
+          });
           const number = Number.parseInt(values.track, 10);
-          const title = host.safeName(values.title || track.file.name.replace(/\.[^.]+$/, ""));
-          const name = uniqueFilename(number ? `${String(number).padStart(2, "0")} - ${[...title].slice(0, 100).join("") || "Track"}.mp3`
-            : host.outputName(values.artist, values.title, track.file.name), usedNames);
+          const title = host.safeName(
+            values.title || track.file.name.replace(/\.[^.]+$/, ""),
+          );
+          const name = uniqueFilename(
+            number
+              ? `${String(number).padStart(2, "0")} - ${[...title].slice(0, 100).join("") || "Track"}.mp3`
+              : host.outputName(values.artist, values.title, track.file.name),
+            usedNames,
+          );
           track.result = { blob, name, url: URL.createObjectURL(blob) };
           track.status = "Complete";
           completed++;
         } catch (error) {
           track.status = "Error";
-          track.error = error.message || "This track could not be processed. Try another source file.";
+          track.error =
+            error.message ||
+            "This track could not be processed. Try another source file.";
         }
         render();
       }
       currentTrack = null;
       if (completed) {
         host.setStatus("Preparing album ZIP…");
-        const blob = await createZip(tracks.filter((track) => track.result).map((track) => track.result));
+        const blob = await createZip(
+          tracks.filter((track) => track.result).map((track) => track.result),
+        );
         archiveUrl = URL.createObjectURL(blob);
-        const albums = new Set(tracks.filter((track) => track.result).map((track) => track.values.album.trim()).filter(Boolean));
+        const albums = new Set(
+          tracks
+            .filter((track) => track.result)
+            .map((track) => track.values.album.trim())
+            .filter(Boolean),
+        );
         const album = albums.size === 1 ? [...albums][0] : "Tagged album";
         albumDownload.href = archiveUrl;
         albumDownload.download = `${[...host.safeName(album)].slice(0, 100).join("") || "Tagged album"}.zip`;
         albumDownload.hidden = false;
       }
-      host.setStatus(`Album processed: ${completed} complete, ${tracks.length - completed} failed.${completed ? " Download your album or individual tracks." : " Check the errors below each track."}`, completed ? "ok" : "err");
+      host.setStatus(
+        `Album processed: ${completed} complete, ${tracks.length - completed} failed.${completed ? " Download your album or individual tracks." : " Check the errors beside each track."}`,
+        completed ? "ok" : "err",
+      );
     } catch (error) {
-      host.setStatus(`${completed} tracks complete. ${error.message} Individual downloads remain available.`, "err");
+      host.setStatus(
+        `${completed} tracks complete. ${error.message} Individual downloads remain available.`,
+        "err",
+      );
     } finally {
       currentTrack = null;
       busy = false;
@@ -348,34 +668,44 @@ export function createBatchEditor(host) {
   }
 
   list.addEventListener("input", (event) => {
-    if (busy) return;
-    const track = tracks.find((entry) => entry.id === event.target.closest(".track-card")?.dataset.trackId);
-    if (!track) return;
-    if (event.target.matches("[data-select]")) track.selected = event.target.checked;
+    const track = trackFor(event.target);
     const key = event.target.dataset.field;
-    if (key) {
-      track.values[key] = event.target.value;
-      track.edited.add(key);
-      if (key === "track") orderVersion++;
-      invalidate(track);
-    }
+    if (busy || !track || !key) return;
+    track.values[key] = event.target.value;
+    track.edited.add(key);
+    if (key === "track") orderVersion++;
+    invalidate(track);
     render();
+  });
+  list.addEventListener("keydown", (event) => {
+    const key = event.target.dataset.field;
+    if (event.key !== "Enter" || event.isComposing || !key) return;
+    // Enter commits a cell like a spreadsheet instead of processing the album.
+    event.preventDefault();
+    const row = event.target.closest(".track-row");
+    const next = event.shiftKey
+      ? row.previousElementSibling
+      : row.nextElementSibling;
+    next?.querySelector(`[data-field="${key}"]`).focus();
   });
   list.addEventListener("change", (event) => {
     if (busy || !event.target.matches("[data-cover]")) return;
-    const track = tracks.find((entry) => entry.id === event.target.closest(".track-card")?.dataset.trackId);
+    const track = trackFor(event.target);
     const file = event.target.files?.[0];
     if (track && file) setCover(track, file);
     event.target.value = "";
   });
   list.addEventListener("click", (event) => {
+    const track = trackFor(event.target);
+    if (busy || !track) return;
+    if (event.target.matches("[data-select]")) {
+      select(track, event.target.checked, event.shiftKey);
+      return;
+    }
     const action = event.target.closest("[data-action]")?.dataset.action;
-    if (busy || !action) return;
-    const track = tracks.find((entry) => entry.id === event.target.closest(".track-card")?.dataset.trackId);
-    if (!track) return;
     if (action === "remove") remove(track);
     else if (action === "cover-remove") setCover(track, null);
-    else {
+    else if (action === "up" || action === "down") {
       const index = tracks.indexOf(track);
       const next = index + (action === "up" ? -1 : 1);
       if (next < 0 || next >= tracks.length) return;
@@ -385,10 +715,47 @@ export function createBatchEditor(host) {
       render();
     }
   });
-  document.getElementById("select-all-tracks").addEventListener("change", (event) => {
+  head.addEventListener("click", (event) => {
+    const key = event.target.closest("[data-bulk-target]")?.dataset.bulkTarget;
+    if (key) openBulkField(key);
+  });
+  selectAll.addEventListener("change", () => {
     if (busy) return;
-    tracks.forEach((track) => { track.selected = event.target.checked; });
+    tracks.forEach((track) => {
+      track.selected = selectAll.checked;
+    });
+    anchor = null;
     render();
+  });
+  bulkFields.addEventListener("change", (event) => {
+    const key = event.target.dataset.bulkMode;
+    if (busy || !key) return;
+    showError(key);
+    if (key !== "cover") {
+      const input = inputOf(key);
+      const previous = event.target.closest(".bulk-row").dataset.mode;
+      if (event.target.value === "sequence") input.value = "1";
+      else if (event.target.value === "set" && previous !== "keep")
+        input.value = "";
+    }
+    renderBulk();
+  });
+  bulkFields.addEventListener("input", (event) => {
+    const key = event.target.dataset.bulkValue;
+    if (busy || !key) return;
+    if (modeOf(key).value === "keep") modeOf(key).value = "set";
+    showError(key);
+    renderBulk();
+  });
+  bulkFields.addEventListener("keydown", (event) => {
+    if (
+      event.key !== "Enter" ||
+      event.isComposing ||
+      !event.target.dataset.bulkValue
+    )
+      return;
+    event.preventDefault();
+    applyBulk();
   });
   document.getElementById("clear-batch").addEventListener("click", clear);
   document.getElementById("sort-tracks").addEventListener("click", () => {
@@ -398,27 +765,20 @@ export function createBatchEditor(host) {
     clearArchive();
     render();
   });
-  document.getElementById("number-tracks").addEventListener("click", () => {
+  applyButton.addEventListener("click", applyBulk);
+  document.getElementById("reset-bulk").addEventListener("click", () => {
     if (busy) return;
-    orderVersion++;
-    tracks.forEach((track, index) => {
-      track.values.track = String(index + 1);
-      track.edited.add("track");
-      invalidate(track);
-    });
-    render();
+    resetBulk();
+    bulkMessage.textContent = "";
+    renderBulk();
   });
-  for (const key of bulkKeys) document.getElementById(`bulk-${key}`).addEventListener("input", () => {
-    document.getElementById(`use-${key}`).checked = true;
-  });
-  document.getElementById("apply-all").addEventListener("click", () => applyBulk(false));
-  document.getElementById("apply-selected").addEventListener("click", () => applyBulk(true));
   sharedCoverInput.addEventListener("change", async () => {
     const file = sharedCoverInput.files?.[0];
     if (busy || !file) return;
     const version = ++shared.version;
     shared.pending = true;
-    bulkMessage.textContent = "Checking album artwork…";
+    showError("cover");
+    bulkMessage.textContent = "Checking artwork…";
     render();
     let url = null;
     try {
@@ -428,12 +788,14 @@ export function createBatchEditor(host) {
       shared.cover = file;
       shared.url = url;
       url = null;
-      sharedPreview.src = shared.url;
-      sharedPreview.hidden = false;
-      document.getElementById("use-cover").checked = true;
-      bulkMessage.textContent = "Album artwork ready. Choose Apply to copy it to tracks.";
+      modeOf("cover").value = "set";
+      bulkMessage.textContent =
+        "Artwork ready. Choose Apply to use it on the selected tracks.";
     } catch (error) {
-      if (version === shared.version) bulkMessage.textContent = error.message;
+      if (version === shared.version) {
+        showError("cover", error.message);
+        bulkMessage.textContent = "";
+      }
     } finally {
       if (url) URL.revokeObjectURL(url);
       if (version === shared.version) {
@@ -443,34 +805,35 @@ export function createBatchEditor(host) {
       }
     }
   });
-  document.getElementById("clear-album-cover").addEventListener("click", () => {
-    if (busy) return;
-    shared.version++;
-    shared.pending = false;
-    shared.cover = null;
-    if (shared.url) URL.revokeObjectURL(shared.url);
-    shared.url = null;
-    sharedPreview.hidden = true;
-    sharedPreview.removeAttribute("src");
-    document.getElementById("use-cover").checked = true;
-    bulkMessage.textContent = "Choose Apply to clear artwork from those tracks.";
-    render();
-  });
 
   return {
-    get active() { return active; },
-    get checking() { return reading() || shared.pending; },
-    get count() { return tracks.length; },
-    add, process, clear,
+    get active() {
+      return active;
+    },
+    get checking() {
+      return reading() || shared.pending;
+    },
+    get count() {
+      return tracks.length;
+    },
+    add,
+    process,
+    clear,
     stage(label) {
       if (!currentTrack) return label;
-      currentTrack.status = /metadata|artwork/i.test(label) ? "Tagging" : /decod|creating/i.test(label) ? "Converting" : "Reading audio";
+      currentTrack.status = /metadata|artwork/i.test(label)
+        ? "Tagging"
+        : /decod|creating/i.test(label)
+          ? "Converting"
+          : "Reading audio";
       renderTrack(currentTrack);
       return `Processing ${processingIndex} of ${tracks.length} · ${label}`;
     },
     updateControls(processing) {
-      root.querySelectorAll("input, button").forEach((control) => { control.disabled = processing; });
-      for (const id of ["apply-all", "apply-selected"]) document.getElementById(id).disabled = processing || shared.pending;
+      root.querySelectorAll("input, button, select").forEach((control) => {
+        control.disabled = processing;
+      });
+      if (!processing) renderBulk();
     },
     dispose() {
       for (const track of tracks) {
@@ -479,7 +842,10 @@ export function createBatchEditor(host) {
       }
       if (archiveUrl) URL.revokeObjectURL(archiveUrl);
       if (shared.url) URL.revokeObjectURL(shared.url);
-      for (const [url, timer] of retired) { clearTimeout(timer); URL.revokeObjectURL(url); }
+      for (const [url, timer] of retired) {
+        clearTimeout(timer);
+        URL.revokeObjectURL(url);
+      }
       retired.clear();
     },
   };

@@ -1,5 +1,6 @@
 import { readSourceMetadata } from "./metadata.js";
 import { createBatchEditor } from "./batch.js";
+import { validTrack } from "./edits.js";
 
 const form = document.getElementById("edit-form");
 const workspace = document.getElementById("workspace");
@@ -671,13 +672,6 @@ function setCoverError(message) {
   coverInput.setAttribute("aria-invalid", String(Boolean(message)));
 }
 
-function validTrack(value) {
-  value = value.trim();
-  const parts = value.split("/").map(Number);
-  return !value || (/^\d{1,4}(\/\d{1,4})?$/.test(value) &&
-    parts.every((part) => part > 0) && (parts.length === 1 || parts[0] <= parts[1]));
-}
-
 function validateTrack() {
   const valid = validTrack(fields.track.value);
   trackError.textContent = valid ? "" : "Use a track from 1–9999, or track/total (e.g. 3/10). The total must be at least the track number.";
@@ -1187,7 +1181,7 @@ window.addEventListener("pagehide", (event) => {
 });
 
 batch = createBatchEditor({
-  inspectAudio, validateArtwork, processTrack, formatLabel, validTrack,
+  inspectAudio, validateArtwork, processTrack, formatLabel,
   safeName, outputName, setBusy, setStatus,
   updateActions: updateActionAvailability,
   finishProcessing() {

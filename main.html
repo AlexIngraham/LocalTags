@@ -31,10 +31,13 @@
             Add metadata and cover art to audio files for Spotify Local Files.
           </p>
         </div>
-
       </header>
 
-      <section class="workspace" id="workspace" aria-labelledby="workspace-title">
+      <section
+        class="workspace"
+        id="workspace"
+        aria-labelledby="workspace-title"
+      >
         <form id="edit-form" novalidate>
           <section class="file-section" aria-labelledby="workspace-title">
             <div class="section-heading">
@@ -62,10 +65,14 @@
               <span class="drop-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
                   <path d="M12 16V4m0 0L7.75 8.25M12 4l4.25 4.25" />
-                  <path d="M5 14.75v3A2.25 2.25 0 0 0 7.25 20h9.5A2.25 2.25 0 0 0 19 17.75v-3" />
+                  <path
+                    d="M5 14.75v3A2.25 2.25 0 0 0 7.25 20h9.5A2.25 2.25 0 0 0 19 17.75v-3"
+                  />
                 </svg>
               </span>
-              <span class="drop-title" id="drop-title">Drop audio files here</span>
+              <span class="drop-title" id="drop-title"
+                >Drop audio files here</span
+              >
               <span class="drop-choice"><span>or</span> choose files</span>
               <span class="drop-formats" id="audio-formats">
                 MP3, WAV, FLAC, AIFF, M4A, AAC, OGG · Up to 200 MB per file
@@ -94,198 +101,321 @@
                 <button class="quiet-button" type="button" id="replace-audio">
                   Replace
                 </button>
-                <button class="quiet-button" type="button" id="remove-audio" aria-label="Remove audio file">
+                <button
+                  class="quiet-button"
+                  type="button"
+                  id="remove-audio"
+                  aria-label="Remove audio file"
+                >
                   Remove
                 </button>
               </div>
             </div>
 
             <p class="field-message" id="audio-error" role="alert" hidden></p>
-            <button class="quiet-button" type="button" id="add-audio">Add files to album</button>
+            <button class="quiet-button" type="button" id="add-audio">
+              Add files to album
+            </button>
             <label class="metadata-toggle" for="import-metadata">
-              <input id="import-metadata" type="checkbox" checked aria-describedby="import-metadata-help" />
+              <input
+                id="import-metadata"
+                type="checkbox"
+                checked
+                aria-describedby="import-metadata-help"
+              />
               <span>
                 Import embedded metadata
-                <small id="import-metadata-help">Applies to the next upload. Turn off to start with blank details and artwork.</small>
+                <small id="import-metadata-help"
+                  >Applies to the next upload. Turn off to start with blank
+                  details and artwork.</small
+                >
               </span>
             </label>
-
           </section>
 
-          <section id="batch-editor" class="batch-editor" aria-labelledby="batch-title" hidden>
+          <section
+            id="batch-editor"
+            class="batch-editor"
+            aria-labelledby="batch-title"
+            hidden
+          >
             <div class="section-heading">
               <p class="step-label">Album</p>
               <div>
-                <h2 id="batch-title">Shared album details</h2>
-                <p>Choose the fields to copy, then apply them to all tracks or your selection. Checked empty fields clear existing values.</p>
+                <h2 id="batch-title">Album tracks</h2>
+                <p>
+                  Select tracks, then change only the fields you choose.
+                  Anything left on Keep existing is never touched, so each track
+                  keeps its own value.
+                </p>
               </div>
             </div>
-            <div class="bulk-fields">
-              <div class="field">
-                <label><input id="use-album" data-bulk-use type="checkbox" /> Apply album</label>
-                <input id="bulk-album" type="text" aria-label="Shared album" placeholder="Album name" />
+            <div
+              class="bulk-panel"
+              role="group"
+              aria-labelledby="bulk-panel-title"
+            >
+              <div class="bulk-heading">
+                <h3 id="bulk-panel-title">Edit selected tracks</h3>
+                <span id="bulk-selection"></span>
               </div>
-              <div class="field">
-                <label><input id="use-albumArtist" data-bulk-use type="checkbox" /> Apply album artist</label>
-                <input id="bulk-albumArtist" type="text" aria-label="Shared album artist" placeholder="Album artist" />
+              <div class="bulk-fields" id="bulk-fields">
+                <div class="bulk-row" data-bulk-row="cover">
+                  <label class="bulk-label" for="bulk-mode-cover"
+                    >Cover art</label
+                  >
+                  <select
+                    id="bulk-mode-cover"
+                    data-bulk-mode="cover"
+                    aria-describedby="bulk-cover-note bulk-error-cover"
+                  >
+                    <option value="keep">Keep existing</option>
+                    <option value="set">Replace with</option>
+                    <option value="clear">Remove artwork</option>
+                  </select>
+                  <div class="bulk-cover">
+                    <img
+                      id="album-cover-preview"
+                      alt="Artwork preview"
+                      hidden
+                    />
+                    <span id="bulk-cover-note"></span>
+                    <label class="quiet-button" for="album-cover"
+                      >Choose image</label
+                    >
+                    <input
+                      id="album-cover"
+                      class="visually-hidden-file"
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                    />
+                  </div>
+                  <p class="bulk-error" id="bulk-error-cover" hidden></p>
+                </div>
               </div>
-              <div class="field">
-                <label><input id="use-genre" data-bulk-use type="checkbox" /> Apply genre</label>
-                <input id="bulk-genre" type="text" aria-label="Shared genre" placeholder="Genre" />
+              <div class="bulk-actions">
+                <button
+                  class="quiet-button bulk-apply"
+                  type="button"
+                  id="apply-selected"
+                >
+                  Apply to selected tracks
+                </button>
+                <button class="text-button" type="button" id="reset-bulk">
+                  Reset
+                </button>
+                <p id="bulk-plan" class="field-hint"></p>
               </div>
+              <p id="bulk-message" class="field-hint" role="status"></p>
             </div>
-            <div class="album-artwork">
-              <label><input id="use-cover" data-bulk-use type="checkbox" /> Apply cover art</label>
-              <img id="album-cover-preview" alt="Shared album artwork" hidden />
-              <label class="quiet-button" for="album-cover">Choose album artwork</label>
-              <input id="album-cover" class="visually-hidden-file" type="file" accept="image/jpeg,image/png,image/gif,image/webp" />
-              <button class="text-button" type="button" id="clear-album-cover">Use no artwork</button>
-              <span class="field-hint">JPEG, PNG, GIF or WebP · Up to 10 MB</span>
-            </div>
-            <div class="batch-toolbar">
-              <button class="quiet-button" type="button" id="apply-all">Apply to all tracks</button>
-              <button class="quiet-button" type="button" id="apply-selected">Apply to selected tracks</button>
-            </div>
-            <p id="bulk-message" class="field-hint" role="status"></p>
             <div class="batch-toolbar track-toolbar">
-              <label><input id="select-all-tracks" type="checkbox" /> Select all</label>
               <span id="batch-summary" role="status"></span>
-              <button class="quiet-button" type="button" id="sort-tracks">Sort by track / filename</button>
-              <button class="quiet-button" type="button" id="number-tracks">Auto-number tracks</button>
-              <button class="quiet-button" type="button" id="clear-batch">Clear album</button>
+              <button class="quiet-button" type="button" id="sort-tracks">
+                Sort by track / filename
+              </button>
+              <button class="quiet-button" type="button" id="clear-batch">
+                Clear album
+              </button>
             </div>
-            <p class="field-hint">Track numbers are kept unless you choose Auto-number. Use the arrows to change the order.</p>
-            <div id="track-list" aria-label="Album tracks"></div>
-            <a class="download-link album-download" id="album-download" hidden>Download Album ZIP</a>
+            <p class="field-hint" id="track-table-help">
+              Edit a cell to change only that track. Shift-click checkboxes to
+              select a range. A column’s pencil sets that field on the selected
+              tracks.
+            </p>
+            <div class="track-table-wrap" id="track-table-wrap">
+              <table
+                class="track-table"
+                aria-labelledby="batch-title"
+                aria-describedby="track-table-help"
+              >
+                <thead id="track-head"></thead>
+                <tbody id="track-list"></tbody>
+              </table>
+            </div>
+            <p class="field-hint album-empty" id="album-empty" hidden>
+              No tracks yet. Add audio files above.
+            </p>
+            <a class="download-link album-download" id="album-download" hidden
+              >Download Album ZIP</a
+            >
           </section>
 
-          <section class="editor-section" id="editor-section" aria-labelledby="editor-title">
+          <section
+            class="editor-section"
+            id="editor-section"
+            aria-labelledby="editor-title"
+          >
             <div id="single-editor">
-            <div class="section-heading editor-heading">
-              <p class="step-label">Track details</p>
-              <div>
-                <h2 id="editor-title">Metadata &amp; artwork</h2>
-                <p id="metadata-note" aria-live="polite">All details are optional. Existing tags are filled in when available.</p>
-              </div>
-            </div>
-
-            <div class="editor-grid">
-              <div class="metadata-fields">
-                <div class="field field-wide">
-                  <label for="title">Title</label>
-                  <input
-                    id="title"
-                    type="text"
-                    name="title"
-                    placeholder="Song title"
-                    autocomplete="off"
-                  />
-                </div>
-
-                <div class="field field-wide">
-                  <label for="artist">Artist</label>
-                  <input
-                    id="artist"
-                    type="text"
-                    name="artist"
-                    placeholder="Artist name"
-                    autocomplete="off"
-                  />
-                </div>
-
-                <div class="field field-wide">
-                  <label for="album">Album</label>
-                  <input
-                    id="album"
-                    type="text"
-                    name="album"
-                    placeholder="Album name"
-                    autocomplete="off"
-                  />
-                </div>
-
-                <div class="field field-wide">
-                  <label for="albumArtist">Album artist</label>
-                  <input id="albumArtist" type="text" name="albumArtist" placeholder="Album artist" autocomplete="off" />
-                </div>
-
-                <div class="field field-track">
-                  <label for="track">Track number</label>
-                  <input
-                    id="track"
-                    type="text"
-                    name="track"
-                    placeholder="e.g. 3/10"
-                    aria-describedby="track-help track-error"
-                    autocomplete="off"
-                  />
-                  <p class="field-hint" id="track-help">Track only: 3 · Track of total: 3/10</p>
-                  <p class="field-message" id="track-error" role="alert" hidden></p>
-                </div>
-
-                <div class="field field-genre">
-                  <label for="genre">Genre</label>
-                  <input
-                    id="genre"
-                    type="text"
-                    name="genre"
-                    placeholder="e.g. Jazz, Indie rock"
-                    autocomplete="off"
-                  />
+              <div class="section-heading editor-heading">
+                <p class="step-label">Track details</p>
+                <div>
+                  <h2 id="editor-title">Metadata &amp; artwork</h2>
+                  <p id="metadata-note" aria-live="polite">
+                    All details are optional. Existing tags are filled in when
+                    available.
+                  </p>
                 </div>
               </div>
 
-              <div class="artwork-field">
-                <div class="artwork-label-row">
-                  <label id="cover-label" for="cover">Cover art</label>
-                  <span>Optional</span>
-                </div>
-                <input
-                  id="cover"
-                  class="visually-hidden-file"
-                  type="file"
-                  name="cover"
-                  aria-describedby="cover-help cover-error"
-                  accept="image/jpeg,image/png,image/gif,image/webp"
-                />
-                <label class="cover-drop" id="cover-drop" for="cover">
-                  <span class="cover-empty" id="cover-empty">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" />
-                      <circle cx="9" cy="10" r="1.5" />
-                      <path d="m5.5 17 4.25-4.25 3 3 2-2 3.75 3.25" />
-                    </svg>
-                    <strong>Add artwork</strong>
-                    <small>Drop or choose an image</small>
-                  </span>
-                  <img id="cover-preview" alt="Selected cover artwork preview" hidden />
-                  <span class="cover-replace">Replace artwork</span>
-                </label>
-                <div class="cover-info" id="cover-info" hidden>
-                  <span id="cover-name"></span>
-                  <button class="text-button" type="button" id="remove-cover" aria-label="Remove cover artwork">
-                    Remove
-                  </button>
-                </div>
-                <p class="field-hint" id="cover-help">JPEG, PNG, GIF or WebP · Up to 10 MB</p>
-                <p class="field-message cover-message" id="cover-error" role="alert" hidden></p>
-              </div>
-            </div>
+              <div class="editor-grid">
+                <div class="metadata-fields">
+                  <div class="field field-wide">
+                    <label for="title">Title</label>
+                    <input
+                      id="title"
+                      type="text"
+                      name="title"
+                      placeholder="Song title"
+                      autocomplete="off"
+                    />
+                  </div>
 
+                  <div class="field field-wide">
+                    <label for="artist">Artist</label>
+                    <input
+                      id="artist"
+                      type="text"
+                      name="artist"
+                      placeholder="Artist name"
+                      autocomplete="off"
+                    />
+                  </div>
+
+                  <div class="field field-wide">
+                    <label for="album">Album</label>
+                    <input
+                      id="album"
+                      type="text"
+                      name="album"
+                      placeholder="Album name"
+                      autocomplete="off"
+                    />
+                  </div>
+
+                  <div class="field field-wide">
+                    <label for="albumArtist">Album artist</label>
+                    <input
+                      id="albumArtist"
+                      type="text"
+                      name="albumArtist"
+                      placeholder="Album artist"
+                      autocomplete="off"
+                    />
+                  </div>
+
+                  <div class="field field-track">
+                    <label for="track">Track number</label>
+                    <input
+                      id="track"
+                      type="text"
+                      name="track"
+                      placeholder="e.g. 3/10"
+                      aria-describedby="track-help track-error"
+                      autocomplete="off"
+                    />
+                    <p class="field-hint" id="track-help">
+                      Track only: 3 · Track of total: 3/10
+                    </p>
+                    <p
+                      class="field-message"
+                      id="track-error"
+                      role="alert"
+                      hidden
+                    ></p>
+                  </div>
+
+                  <div class="field field-genre">
+                    <label for="genre">Genre</label>
+                    <input
+                      id="genre"
+                      type="text"
+                      name="genre"
+                      placeholder="e.g. Jazz, Indie rock"
+                      autocomplete="off"
+                    />
+                  </div>
+                </div>
+
+                <div class="artwork-field">
+                  <div class="artwork-label-row">
+                    <label id="cover-label" for="cover">Cover art</label>
+                    <span>Optional</span>
+                  </div>
+                  <input
+                    id="cover"
+                    class="visually-hidden-file"
+                    type="file"
+                    name="cover"
+                    aria-describedby="cover-help cover-error"
+                    accept="image/jpeg,image/png,image/gif,image/webp"
+                  />
+                  <label class="cover-drop" id="cover-drop" for="cover">
+                    <span class="cover-empty" id="cover-empty">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" />
+                        <circle cx="9" cy="10" r="1.5" />
+                        <path d="m5.5 17 4.25-4.25 3 3 2-2 3.75 3.25" />
+                      </svg>
+                      <strong>Add artwork</strong>
+                      <small>Drop or choose an image</small>
+                    </span>
+                    <img
+                      id="cover-preview"
+                      alt="Selected cover artwork preview"
+                      hidden
+                    />
+                    <span class="cover-replace">Replace artwork</span>
+                  </label>
+                  <div class="cover-info" id="cover-info" hidden>
+                    <span id="cover-name"></span>
+                    <button
+                      class="text-button"
+                      type="button"
+                      id="remove-cover"
+                      aria-label="Remove cover artwork"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <p class="field-hint" id="cover-help">
+                    JPEG, PNG, GIF or WebP · Up to 10 MB
+                  </p>
+                  <p
+                    class="field-message cover-message"
+                    id="cover-error"
+                    role="alert"
+                    hidden
+                  ></p>
+                </div>
+              </div>
             </div>
 
             <div class="action-panel">
               <div class="status-region">
-                <p class="status" id="status" aria-live="polite" aria-atomic="true"></p>
+                <p
+                  class="status"
+                  id="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                ></p>
                 <div class="download-recovery" id="download-recovery" hidden>
                   <span class="download-name" id="download-name"></span>
-                  <a class="download-link" id="download-link" hidden>Download again</a>
-                  <p class="download-help">If your download didn’t appear, use the link above.</p>
+                  <a class="download-link" id="download-link" hidden
+                    >Download again</a
+                  >
+                  <p class="download-help">
+                    If your download didn’t appear, use the link above.
+                  </p>
                 </div>
               </div>
 
               <div class="action-row" id="action-row">
-                <button class="primary-button" id="submit-button" type="submit" disabled>
+                <button
+                  class="primary-button"
+                  id="submit-button"
+                  type="submit"
+                  disabled
+                >
                   <span class="button-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24">
                       <path d="M12 4v12m0 0-4.25-4.25M12 16l4.25-4.25" />
@@ -300,7 +430,14 @@
                   <span id="progress-stage">Reading audio…</span>
                   <span id="progress-label"></span>
                 </div>
-                <div class="progress-track" id="progress-meter" role="progressbar" aria-label="Reading audio" aria-valuemin="0" aria-valuemax="100">
+                <div
+                  class="progress-track"
+                  id="progress-meter"
+                  role="progressbar"
+                  aria-label="Reading audio"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                >
                   <div class="progress-fill" id="progress-fill"></div>
                 </div>
               </div>
@@ -316,7 +453,10 @@
       </footer>
     </main>
 
-    <script defer src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"
+    ></script>
     <script type="module" src="app.js"></script>
   </body>
 </html>

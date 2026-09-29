@@ -8,7 +8,7 @@ Accepts MP3, WAV, FLAC, AIFF, M4A, AAC, and OGG. Non-MP3 files convert to MP3, t
 
 Select/drop multiple files to open the album editor, or use **Add files to album** to keep the current track and add more. Each track imports its own tags when **Import embedded metadata** is enabled. Album artist is supported independently of track artist.
 
-Choose shared fields and artwork, then explicitly apply them to all tracks or selected tracks. A checked empty field clears that value. Existing track numbers stay unchanged until **Auto-number tracks** is pressed; arrows change track order.
+Tracks appear as rows in a table; edit a cell to change only that track. To edit several at once, select their rows (Shift-click for a range) and set each field in **Edit selected tracks** to **Keep existing**, **Set to**, or **Clear**, or use a column's pencil button. Only the fields you set or clear change; every other field keeps each track's own value, and differing values show as *Mixed*. Cover art can be kept, replaced, or removed, and track numbers can be numbered in list order from any start. Arrows change track order.
 
 **Process Album** converts tracks sequentially at 192 kbps, preserves existing MP3 audio, and continues past individual failures. Download the successful tracks individually or together with **Download Album ZIP**. ZIPs use uncompressed entries and bounded checksum reads; archives larger than 4 GB must be split into smaller batches or downloaded individually. Removing tracks, clearing the album, and replacing exports release their preview/output resources.
 
@@ -28,4 +28,4 @@ npm test
 BROWSER_EXECUTABLE='/path/to/chromium' npm test
 ```
 
-The tests exercise real conversion, metadata races, shared edits, and ZIP extraction/CRCs. `tests/fixtures/tone.flac` is a generated 0.25-second 440 Hz sine wave with fixture tags, created locally with FFmpeg. No external media is required.
+The tests exercise real conversion, metadata races, selective bulk edits, and ZIP extraction/CRCs. `tests/fixtures/tone.flac` is a generated 0.25-second 440 Hz sine wave with fixture tags, created locally with FFmpeg. No external media is required.
