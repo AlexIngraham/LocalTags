@@ -351,6 +351,43 @@ try {
     assert.equal(result.tags.APIC, undefined, "removing imported art removes it from the exported MP3");
   });
 
+  await check("metadata import toggle applies to new uploads and leaves current edits alone", async (page) => {
+    const toggle = page.getByLabel("Import embedded metadata", { exact: false });
+    assert.ok(await toggle.isChecked(), "import is enabled by default");
+    const tagged = { name: "tagged.mp3", mimeType: "audio/mpeg", buffer: completeMp3 };
+    await ready(page, tagged);
+    await page.locator("#title").fill("My current edit");
+    const coverUrl = await page.locator("#cover-preview").getAttribute("src");
+    await toggle.uncheck();
+    assert.equal(await page.locator("#title").inputValue(), "My current edit");
+    assert.equal(await page.locator("#cover-preview").getAttribute("src"), coverUrl);
+    await ready(page, tagged);
+    assert.deepEqual(await fieldValues(page), { title: "", artist: "", album: "", track: "", genre: "" });
+    assert.ok(await page.locator("#cover-preview").isHidden());
+    assert.match(await page.locator("#metadata-note").textContent(), /import is off/i);
+    const result = await convert(page);
+    for (const tag of ["TIT2", "TPE1", "TALB", "TRCK", "TCON", "APIC"]) assert.equal(result.tags[tag], undefined);
+    await page.locator("#title").fill("Manual details");
+    await toggle.check();
+    assert.equal(await page.locator("#title").inputValue(), "Manual details");
+    await ready(page, tagged);
+    assert.equal(await page.locator("#title").inputValue(), "Night Walk");
+    assert.ok(await page.locator("#cover-preview").isVisible());
+  });
+
+  await check("disabling import on the next upload also blocks a previous file's delayed metadata", async (page) => {
+    await delayMetadata(page, "old.mp3");
+    await page.locator("#file").setInputFiles({ name: "old.mp3", mimeType: "audio/mpeg", buffer: completeMp3 });
+    await page.waitForFunction(() => window.__metadataWaiting);
+    await page.locator("#import-metadata").uncheck();
+    await ready(page, { name: "new.mp3", mimeType: "audio/mpeg", buffer: completeMp3 });
+    await releaseMetadata(page);
+    assert.deepEqual(await fieldValues(page), { title: "", artist: "", album: "", track: "", genre: "" });
+    assert.ok(await page.locator("#cover-preview").isHidden());
+    assert.match(await page.locator("#metadata-note").textContent(), /import is off/i);
+    assert.ok(await page.locator("#submit-button").isEnabled());
+  });
+
   await check("new FLAC metadata and embedded artwork replace all previous manual edits", async (page) => {
     await ready(page, { name: "Song A.mp3", mimeType: "audio/mpeg", buffer: completeMp3 });
     for (const id of ["title", "artist", "album", "track", "genre"]) {

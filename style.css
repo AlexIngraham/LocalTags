@@ -486,6 +486,33 @@ form {
   gap: 28px;
 }
 
+.metadata-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 22px;
+  cursor: pointer;
+}
+
+.metadata-toggle input {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.metadata-toggle input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.metadata-toggle small {
+  display: block;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
 .metadata-fields {
   display: grid;
   grid-template-columns: minmax(0, 0.45fr) minmax(0, 0.55fr);

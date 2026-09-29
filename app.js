@@ -16,6 +16,7 @@ const replaceAudioBtn = document.getElementById("replace-audio");
 const removeAudioBtn = document.getElementById("remove-audio");
 const fileDurationEl = document.getElementById("file-duration");
 const metadataNote = document.getElementById("metadata-note");
+const importMetadataInput = document.getElementById("import-metadata");
 const fields = Object.fromEntries(["title", "artist", "album", "track", "genre"].map((name) => [name, document.getElementById(name)]));
 const trackError = document.getElementById("track-error");
 const coverInput = document.getElementById("cover");
@@ -824,6 +825,8 @@ function removeAudio() {
 async function selectAudioFile(file) {
   if (!file || isProcessing) return;
   const token = ++selectionToken;
+  // Changing the preference during a read only affects subsequent uploads.
+  const shouldImportMetadata = importMetadataInput.checked;
   isReadingAudio = true;
   setAudioError("");
   audioDrop.classList.add("is-checking");
@@ -848,7 +851,7 @@ async function selectAudioFile(file) {
     // current source. Validation and committed-source reads have separate tokens.
     const sourceToken = ++sourceSelectionToken;
     isReadingAudio = false;
-    isReadingMetadata = true;
+    isReadingMetadata = shouldImportMetadata;
     invalidateDownload();
     // Each accepted upload starts a fresh track, including manual edits/artwork.
     clearMetadata();
@@ -856,6 +859,10 @@ async function selectAudioFile(file) {
     selectedAudioFormat = format;
     sourceDuration = null;
     renderAudioState();
+    if (!shouldImportMetadata) {
+      metadataNote.textContent = "Metadata import is off. Add any details you like, or create as is.";
+      return;
+    }
     metadataNote.textContent = "Reading existing metadata… You can keep editing.";
     try {
       const source = await readSourceMetadata(file);
