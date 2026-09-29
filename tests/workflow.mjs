@@ -45,6 +45,67 @@ const artworkFixture = {
   buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFioAAAAASUVORK5CYII=", "base64"),
 };
 
+function taggedFlac(values, picture) {
+  const uint = (value, littleEndian = false) => {
+    const bytes = Buffer.alloc(4);
+    if (littleEndian) bytes.writeUInt32LE(value);
+    else bytes.writeUInt32BE(value);
+    return bytes;
+  };
+  const block = (type, bytes) => {
+    const header = Buffer.alloc(4);
+    header[0] = type;
+    header.writeUIntBE(bytes.length, 1, 3);
+    return Buffer.concat([header, bytes]);
+  };
+  const entries = Object.entries(values).map(([key, value]) => Buffer.from(`${key}=${value}`));
+  const comments = Buffer.concat([uint(0, true), uint(entries.length, true),
+    ...entries.flatMap((entry) => [uint(entry.length, true), entry])]);
+  const blocks = [block(picture ? 4 : 0x84, comments)];
+  if (picture) blocks.push(block(0x86, Buffer.concat([
+    uint(3), uint(9), Buffer.from("image/png"), uint(0),
+    uint(1), uint(1), uint(24), uint(0), uint(picture.length), picture,
+  ])));
+  return { name: "Song B.flac", mimeType: "audio/flac", buffer: Buffer.concat([Buffer.from("fLaC"), ...blocks]) };
+}
+
+async function fieldValues(page) {
+  return page.evaluate(() => Object.fromEntries(["title", "artist", "album", "track", "genre"]
+    .map((id) => [id, document.getElementById(id).value])));
+}
+
+// Gate the final metadata read, after validation, so race tests need no timed sleeps.
+async function delayMetadata(page, filename) {
+  await page.evaluate((name) => {
+    const slice = File.prototype.slice;
+    const gate = new Promise((resolve) => { window.__releaseMetadata = resolve; });
+    let finish;
+    window.__metadataFinished = new Promise((resolve) => { finish = resolve; });
+    File.prototype.slice = function (start, end) {
+      const blob = slice.call(this, start, end);
+      if (this.name === name && start === this.size - 128 && end === this.size) {
+        const read = blob.arrayBuffer.bind(blob);
+        blob.arrayBuffer = async () => {
+          window.__metadataWaiting = true;
+          await gate;
+          const bytes = await read();
+          setTimeout(finish, 0);
+          return bytes;
+        };
+      }
+      return blob;
+    };
+  }, filename);
+}
+
+async function releaseMetadata(page) {
+  // Wait for the gated Blob read and its caller's microtasks to finish.
+  await page.evaluate(async () => {
+    window.__releaseMetadata();
+    await window.__metadataFinished;
+  });
+}
+
 function readTags(bytes) {
   assert.equal(bytes.toString("ascii", 0, 3), "ID3", "download contains an ID3 header");
   const syncsafe = (at) => (bytes[at] << 21) | (bytes[at + 1] << 14) | (bytes[at + 2] << 7) | bytes[at + 3];
@@ -290,6 +351,102 @@ try {
     assert.equal(result.tags.APIC, undefined, "removing imported art removes it from the exported MP3");
   });
 
+  await check("new FLAC metadata and embedded artwork replace all previous manual edits", async (page) => {
+    await ready(page, { name: "Song A.mp3", mimeType: "audio/mpeg", buffer: completeMp3 });
+    for (const id of ["title", "artist", "album", "track", "genre"]) {
+      await page.locator(`#${id}`).fill(id === "track" ? "9" : `Edited ${id}`);
+    }
+    await page.locator("#cover").setInputFiles(artworkFixture);
+    await page.waitForFunction(() => !document.querySelector("#submit-button").disabled);
+    const previousUrl = await page.locator("#cover-preview").getAttribute("src");
+    const picture = Buffer.from(await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 2;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "red";
+      context.fillRect(0, 0, 2, 2);
+      return canvas.toDataURL("image/png").split(",")[1];
+    }), "base64");
+    await ready(page, taggedFlac({ TITLE: "Song B", ARTIST: "Artist B", ALBUM: "Album B", TRACKNUMBER: "2", GENRE: "Jazz" }, picture));
+    assert.deepEqual(await fieldValues(page), { title: "Song B", artist: "Artist B", album: "Album B", track: "2", genre: "Jazz" });
+    const currentUrl = await page.locator("#cover-preview").getAttribute("src");
+    assert.notEqual(currentUrl, previousUrl);
+    assert.ok(await page.evaluate((url) => window.__workflow.revoked.includes(url), previousUrl));
+    const embedded = await page.evaluate(async (url) => [...new Uint8Array(await (await fetch(url)).arrayBuffer())], currentUrl);
+    assert.deepEqual(Buffer.from(embedded), picture);
+  });
+
+  await check("missing fields and artwork clear both imported values and manual edits", async (page) => {
+    await ready(page, { name: "Song A.mp3", mimeType: "audio/mpeg", buffer: completeMp3 });
+    await page.locator("#album").fill("My album");
+    await page.locator("#track").fill("invalid");
+    await page.locator("#track").blur();
+    await page.locator("#cover").setInputFiles(artworkFixture);
+    await page.waitForFunction(() => !document.querySelector("#submit-button").disabled);
+    const previousUrl = await page.locator("#cover-preview").getAttribute("src");
+    await ready(page, taggedFlac({ TITLE: "Song B", ARTIST: "Artist B" }));
+    assert.deepEqual(await fieldValues(page), { title: "Song B", artist: "Artist B", album: "", track: "", genre: "" });
+    assert.ok(await page.locator("#track-error").isHidden());
+    assert.ok(await page.locator("#cover-preview").isHidden());
+    assert.ok(await page.evaluate((url) => window.__workflow.revoked.includes(url), previousUrl));
+    await ready(page);
+    assert.deepEqual(await fieldValues(page), { title: "", artist: "", album: "", track: "", genre: "" });
+    assert.ok(await page.locator("#audio-error").isHidden());
+  });
+
+  for (const coverChoice of ["replace", "remove"]) {
+    await check(`delayed metadata preserves current manual fields and artwork ${coverChoice}`, async (page) => {
+      await delayMetadata(page, "delayed.mp3");
+      await page.locator("#file").setInputFiles({ name: "delayed.mp3", mimeType: "audio/mpeg", buffer: completeMp3 });
+      await page.waitForFunction(() => window.__metadataWaiting);
+      await page.locator("#title").fill("My current title");
+      await page.locator("#album").fill("Temporary");
+      await page.locator("#album").fill("");
+      await page.locator("#cover").setInputFiles(artworkFixture);
+      await page.locator("#cover-preview").waitFor({ state: "visible" });
+      const manualUrl = await page.locator("#cover-preview").getAttribute("src");
+      if (coverChoice === "remove") await page.locator("#remove-cover").click();
+      await releaseMetadata(page);
+      await page.waitForFunction(() => !document.querySelector("#submit-button").disabled);
+      assert.equal(await page.locator("#title").inputValue(), "My current title");
+      assert.equal(await page.locator("#album").inputValue(), "");
+      assert.equal(await page.locator("#artist").inputValue(), "Local Artist");
+      assert.equal(await page.locator("#cover-preview").getAttribute("src"), coverChoice === "remove" ? null : manualUrl);
+      await ready(page, { name: "next.mp3", mimeType: "audio/mpeg", buffer: completeMp3 });
+      assert.equal(await page.locator("#title").inputValue(), "Night Walk");
+      assert.equal(await page.locator("#album").inputValue(), "After Hours");
+      assert.ok(await page.locator("#cover-preview").isVisible(), "a previous manual removal does not suppress the new file's art");
+    });
+  }
+
+  await check("a stale metadata parse cannot change the newer file's fields, artwork, or status", async (page) => {
+    await delayMetadata(page, "old.mp3");
+    await page.locator("#file").setInputFiles({ name: "old.mp3", mimeType: "audio/mpeg", buffer: completeMp3 });
+    await page.waitForFunction(() => window.__metadataWaiting);
+    await ready(page, taggedFlac({ TITLE: "Current title", ARTIST: "Current artist" }));
+    await page.locator("#title").fill("Current edit");
+    const note = await page.locator("#metadata-note").textContent();
+    await releaseMetadata(page);
+    assert.deepEqual(await fieldValues(page), { title: "Current edit", artist: "Current artist", album: "", track: "", genre: "" });
+    assert.ok(await page.locator("#cover-preview").isHidden());
+    assert.equal(await page.locator("#metadata-note").textContent(), note);
+    assert.equal(await page.locator("#file-name").textContent(), "Song B.flac");
+    assert.ok(await page.locator("#submit-button").isEnabled());
+  });
+
+  await check("malformed metadata does not block loading or converting playable audio", async (page) => {
+    await ready(page, { name: "old.mp3", mimeType: "audio/mpeg", buffer: completeMp3 });
+    const buffer = Buffer.concat([audioFixture.buffer, Buffer.from("LIST"), Buffer.from([255, 255, 255, 127])]);
+    buffer.writeUInt32LE(buffer.length - 8, 4);
+    await ready(page, { name: "malformed-tags.wav", mimeType: "audio/wav", buffer });
+    assert.deepEqual(await fieldValues(page), { title: "", artist: "", album: "", track: "", genre: "" });
+    assert.ok(await page.locator("#cover-preview").isHidden());
+    assert.ok(await page.locator("#audio-error").isHidden());
+    const result = await convert(page);
+    assert.equal(result.tags.TIT2, undefined);
+    assert.equal(result.tags.APIC, undefined);
+  });
+
   await check("replacing source during an artwork read cannot restore the previous source's image", async (page) => {
     assert.ok(completeMp3);
     await page.evaluate(() => {
@@ -306,13 +463,13 @@ try {
     await page.locator("#title").fill("Edited while reading");
     await ready(page);
     assert.equal(await page.locator("#artist").inputValue(), "", "previous source's untouched fields are cleared");
-    assert.equal(await page.locator("#title").inputValue(), "Edited while reading");
+    assert.equal(await page.locator("#title").inputValue(), "");
     await page.evaluate(() => window.__releaseArtwork());
     await page.waitForFunction(() => window.__workflow.revoked.includes(window.__delayedArtworkUrl));
     assert.ok(await page.locator("#cover-preview").isHidden());
     const result = await convert(page);
     assert.equal(result.tags.APIC, undefined);
-    assert.equal(result.tags.TIT2, "Edited while reading");
+    assert.equal(result.tags.TIT2, undefined);
   });
 
   await check("Enter submits once and restores keyboard focus after conversion", async (page) => {
@@ -390,7 +547,7 @@ try {
     assert.ok(await page.locator("#submit-button").isEnabled());
   });
 
-  await check("corrupt audio processing failure retains edits and permits a successful retry", async (page) => {
+  await check("corrupt audio processing failure retains edits until another file is loaded", async (page) => {
     await ready(page, { name: "corrupt.wav", mimeType: "audio/wav", buffer: Buffer.from("RIFF0000WAVEthis file has no valid audio data") });
     await page.locator("#title").fill("Do not lose this");
     await page.locator("#artist").fill("Retry artist");
@@ -401,12 +558,13 @@ try {
     assert.ok(await page.locator("#submit-button").isEnabled());
     assert.ok(await page.locator("#progress").isHidden());
     assert.equal(await page.locator("#title").inputValue(), "Do not lose this");
+    assert.ok(await page.locator("#cover-preview").isVisible());
     assert.equal(await page.evaluate(() => window.__workflow.automaticDownloads), 0);
     await ready(page);
-    assert.equal(await page.locator("#title").inputValue(), "Do not lose this");
+    assert.equal(await page.locator("#title").inputValue(), "");
     const result = await convert(page);
-    assert.equal(result.tags.TIT2, "Do not lose this");
-    assert.ok(result.tags.APIC);
+    assert.equal(result.tags.TIT2, undefined);
+    assert.equal(result.tags.APIC, undefined);
   });
 
   await check("track number validation supports N and N/total and focuses an invalid field", async (page) => {
@@ -461,7 +619,7 @@ try {
 
   await check("drag-over feedback and dropping a replacement into the populated source", async (page) => {
     await ready(page);
-    await page.locator("#title").fill("Kept while replacing");
+    await page.locator("#title").fill("Cleared when replacing");
     const transfer = await page.evaluateHandle((bytes) => {
       const transfer = new DataTransfer();
       transfer.items.add(new File([new Uint8Array(bytes)], "Dropped replacement.wav", { type: "audio/wav" }));
@@ -472,7 +630,7 @@ try {
     assert.ok(highlighted, "populated source visibly responds to drag-over");
     await page.locator("#file-summary").dispatchEvent("drop", { dataTransfer: transfer });
     await page.waitForFunction(() => document.querySelector("#file-name").textContent === "Dropped replacement.wav");
-    assert.equal(await page.locator("#title").inputValue(), "Kept while replacing");
+    assert.equal(await page.locator("#title").inputValue(), "");
     await transfer.dispose();
     await convert(page);
   });

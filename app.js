@@ -55,7 +55,7 @@ let sourceDuration = null;
 let coverOrigin = null;
 let selectionToken = 0;
 let sourceSelectionToken = 0;
-// Explicit user edits survive replacement and asynchronous metadata reads.
+// Explicit user edits survive asynchronous metadata reads for the current file.
 const editedFields = new Set();
 const retiredDownloadUrls = new Map();
 
@@ -780,19 +780,21 @@ function removeCover() {
   renderCoverState();
 }
 
-function clearImportedMetadata() {
+function clearMetadata({ preserveEdits = false } = {}) {
+  if (!preserveEdits) editedFields.clear();
   for (const [name, input] of Object.entries(fields)) {
     if (!editedFields.has(name)) input.value = "";
   }
-  if (pendingCover?.origin === "source") {
+  if (!preserveEdits || pendingCover?.origin === "source") {
     pendingCover = null;
     coverDrop.classList.remove("is-checking");
   }
-  if (coverOrigin === "source") {
+  if (!preserveEdits || coverOrigin === "source") {
     if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
     coverPreviewUrl = null;
     selectedCoverFile = null;
     coverOrigin = null;
+    coverInput.value = "";
     setCoverError("");
     renderCoverState();
   }
@@ -809,7 +811,7 @@ function removeAudio() {
   selectedAudioFormat = null;
   sourceDuration = null;
   fileInput.value = "";
-  clearImportedMetadata();
+  clearMetadata({ preserveEdits: true });
   invalidateDownload();
   setAudioError("");
   metadataNote.textContent = "All details are optional. Existing tags are filled in when available.";
@@ -848,7 +850,8 @@ async function selectAudioFile(file) {
     isReadingAudio = false;
     isReadingMetadata = true;
     invalidateDownload();
-    clearImportedMetadata();
+    // Each accepted upload starts a fresh track, including manual edits/artwork.
+    clearMetadata();
     selectedAudioFile = file;
     selectedAudioFormat = format;
     sourceDuration = null;
