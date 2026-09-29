@@ -85,6 +85,7 @@ function setProgress(ratio) {
   progressLabel.textContent = pct + "%";
   progressEl.classList.remove("is-indeterminate");
   progressMeter.setAttribute("aria-valuenow", String(pct));
+  if (batch?.active) batch.progress(pct);
 }
 
 async function setStage(label, determinate = false) {
@@ -712,7 +713,7 @@ function renderAudioState() {
   fileInput.tabIndex = hasFile ? -1 : 0;
   workspaceDescription.textContent = hasFile
     ? "Ready to tag. Drop another file here or choose Replace."
-    : "Choose a track. Your audio stays in this browser.";
+    : "Choose a track or an album. Your audio stays in this browser.";
   fileNameEl.textContent = hasFile ? selectedAudioFile.name : "";
   fileNameEl.title = fileNameEl.textContent;
   fileSizeEl.textContent = hasFile ? formatFileSize(selectedAudioFile.size) : "";
@@ -751,10 +752,10 @@ function updateActionAvailability() {
     fileInput.disabled = isProcessing;
     workspaceDescription.textContent = "Add more tracks to your album. Your audio stays in this browser.";
     submitBtn.disabled = isProcessing || batch.checking || !batch.count;
-    submitLabel.textContent = isProcessing ? "Processing album…" : batch.checking ? "Checking files…" : batch.count ? "Process Album" : "Add audio files first";
+    submitLabel.textContent = isProcessing ? batch.actionLabel : batch.checking ? "Checking files…" : batch.count ? batch.actionLabel : "Add audio files first";
     if (!isProcessing && !statusEl.classList.contains("ok") && !statusEl.classList.contains("err")) {
       setStatus(batch.checking ? "Reading album files…" : batch.count
-        ? "Ready to process. Tracks will be converted one at a time." : "Add audio files to begin.");
+        ? `Ready to process all ${batch.count} tracks, one at a time.` : "Add audio files to begin.");
     }
     batch.updateControls(isProcessing);
     return;

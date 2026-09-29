@@ -553,6 +553,16 @@ form {
   accent-color: var(--accent);
   cursor: pointer;
 }
+.batch-editor input[type="checkbox"]:focus-visible,
+.track-table-wrap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.batch-editor input[type="checkbox"]:disabled,
+.bulk-row select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .batch-editor .quiet-button {
   border: 1px solid var(--border-strong);
 }
@@ -701,6 +711,10 @@ form {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+.bulk-cover:has(input:disabled) label[for="album-cover"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .bulk-actions {
   gap: 10px 14px;
   margin-top: 16px;
@@ -731,13 +745,27 @@ form {
 #batch-summary {
   margin-right: auto;
 }
+.destructive-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+.destructive-actions button:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-surface);
+}
 #track-table-help {
   margin-top: 8px;
 }
 .track-table-wrap {
   position: relative;
   margin-top: 12px;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: min(60vh, 600px);
+  scroll-padding: 48px 0;
   background: var(--surface-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -751,6 +779,9 @@ form {
   font-size: 0.9rem;
 }
 .track-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   padding: 8px;
   color: var(--text-soft);
   background: var(--surface-raised);
@@ -770,6 +801,14 @@ form {
 }
 .track-row.is-selected td {
   background: #0f1b14;
+}
+.track-row:hover td,
+.track-row:focus-within td {
+  background: var(--surface-hover);
+}
+.track-row.is-selected:hover td,
+.track-row.is-selected:focus-within td {
+  background: #152b1e;
 }
 .track-table .col-select {
   width: 40px;
@@ -979,11 +1018,6 @@ form {
 .album-empty {
   margin-top: 12px;
 }
-.album-download {
-  display: inline-block;
-  margin-top: 22px;
-}
-
 @media (min-width: 761px) {
   .track-table .col-track {
     position: sticky;
@@ -996,6 +1030,12 @@ form {
     z-index: 1;
     box-shadow: inset -1px 0 0 var(--border-strong);
   }
+}
+
+.track-table thead .col-select,
+.track-table thead .col-track,
+.track-table thead .col-title {
+  z-index: 3;
 }
 
 @media (max-width: 600px) {
@@ -1409,6 +1449,77 @@ form {
 
 .action-row {
   min-width: 0;
+}
+
+.page:has(.batch-editor:not([hidden])) .action-panel {
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  gap: 12px;
+}
+.page:has(.batch-editor:not([hidden])) .action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.page:has(.batch-editor:not([hidden])) .primary-button {
+  width: auto;
+  min-width: 200px;
+}
+.album-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  min-width: 200px;
+  padding: 10px 20px;
+  border-color: var(--border-strong);
+  font-size: 1rem;
+  text-decoration: none;
+}
+.album-download[aria-disabled="true"] {
+  color: var(--text-faint);
+  border-color: var(--border);
+  background: transparent;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.album-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.album-feedback .field-hint {
+  flex: 1 1 260px;
+}
+.album-progress {
+  display: grid;
+  gap: 8px;
+}
+.album-progress progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: 2px;
+  overflow: hidden;
+  background: #242a28;
+  accent-color: var(--accent);
+}
+.album-progress progress::-webkit-progress-bar {
+  background: #242a28;
+}
+.album-progress progress::-webkit-progress-value {
+  background: var(--accent);
+}
+.album-progress progress::-moz-progress-bar {
+  background: var(--accent);
+}
+.page:has(.batch-editor:not([hidden])) .progress {
+  grid-row: auto;
 }
 
 .primary-button {

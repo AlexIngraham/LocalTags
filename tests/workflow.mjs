@@ -303,6 +303,7 @@ async function openEditor({ viewport = { width: 1280, height: 1000 } } = {}) {
             .querySelector("#progress-meter")
             .getAttribute("aria-valuenow"),
           status: document.querySelector("#status")?.textContent,
+          trackStatuses: [...document.querySelectorAll(".track-status")].map((el) => el.textContent),
           disabled: document.querySelector("#submit-button")?.disabled,
           inputsDisabled: [
             ...document.querySelectorAll("#edit-form input"),

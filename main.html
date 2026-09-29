@@ -45,7 +45,7 @@
               <div>
                 <h2 id="workspace-title">Source audio</h2>
                 <p id="workspace-description">
-                  Choose a track. Your audio stays in this browser.
+                  Choose a track or an album. Your audio stays in this browser.
                 </p>
               </div>
             </div>
@@ -202,7 +202,10 @@
                   Apply to selected tracks
                 </button>
                 <button class="text-button" type="button" id="reset-bulk">
-                  Reset
+                  Discard changes
+                </button>
+                <button class="text-button" type="button" id="undo-bulk" hidden>
+                  Undo bulk edit
                 </button>
                 <p id="bulk-plan" class="field-hint"></p>
               </div>
@@ -213,16 +216,22 @@
               <button class="quiet-button" type="button" id="sort-tracks">
                 Sort by track / filename
               </button>
-              <button class="quiet-button" type="button" id="clear-batch">
-                Clear album
-              </button>
+              <div class="destructive-actions" role="group" aria-label="Remove tracks">
+                <button class="quiet-button" type="button" id="remove-selected" disabled>
+                  Remove selected
+                </button>
+                <button class="quiet-button" type="button" id="clear-batch">
+                  Clear album
+                </button>
+              </div>
             </div>
             <p class="field-hint" id="track-table-help">
               Edit a cell to change only that track. Shift-click checkboxes to
               select a range. A column’s pencil sets that field on the selected
               tracks.
             </p>
-            <div class="track-table-wrap" id="track-table-wrap">
+            <div class="track-table-wrap" id="track-table-wrap" tabindex="0"
+              role="region" aria-label="Album tracks, scroll to see all columns">
               <table
                 class="track-table"
                 aria-labelledby="batch-title"
@@ -235,9 +244,6 @@
             <p class="field-hint album-empty" id="album-empty" hidden>
               No tracks yet. Add audio files above.
             </p>
-            <a class="download-link album-download" id="album-download" hidden
-              >Download Album ZIP</a
-            >
           </section>
 
           <section
@@ -424,6 +430,19 @@
                   </span>
                   <span id="submit-label">Add an audio file first</span>
                 </button>
+                <a class="quiet-button album-download" id="album-download"
+                  role="link" aria-disabled="true" aria-describedby="album-download-help"
+                  tabindex="-1" hidden>Download Album ZIP</a>
+              </div>
+              <div class="album-feedback" id="album-feedback" hidden>
+                <p class="field-hint" id="album-download-help" role="status"></p>
+                <button class="text-button" type="button" id="stop-album" hidden>
+                  Stop after this track
+                </button>
+              </div>
+              <div class="album-progress" id="album-progress" hidden>
+                <label class="field-hint" id="album-progress-label" for="album-progress-meter">Album progress</label>
+                <progress id="album-progress-meter" value="0" max="1"></progress>
               </div>
               <div class="progress" id="progress" hidden>
                 <div class="progress-copy">

@@ -115,6 +115,11 @@ export async function runBatchChecks({
     );
   const names = (page) => page.locator(".track-filename").allTextContents();
   const apply = (page) => page.locator("#apply-selected").click();
+  async function clearAlbum(page) {
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#clear-batch").click();
+  }
+
   const setMode = (page, key, mode) =>
     page.locator(`#bulk-mode-${key}`).selectOption(mode);
   const rows = (page) =>
@@ -295,7 +300,7 @@ export async function runBatchChecks({
         await card(page, "02.flac").getAttribute("data-track-id"),
         id,
       );
-      await page.locator("#clear-batch").click();
+      await clearAlbum(page);
       assert.equal(await page.locator(".track-row").count(), 0);
       assert.ok(await page.locator("#album-empty").isVisible());
       assert.ok(await page.locator("#submit-button").isDisabled());
@@ -330,7 +335,7 @@ export async function runBatchChecks({
         await field(card(page, audioFixture.name), "title").inputValue(),
         "",
       );
-      await page.locator("#clear-batch").click();
+      await clearAlbum(page);
       await drop(page, [mp3(), flac]);
       await drop(page, [{ ...audioFixture, name: "dropped.wav" }]);
       assert.equal(await page.locator(".track-row").count(), 3);
@@ -495,7 +500,7 @@ export async function runBatchChecks({
         .click({ modifiers: ["Shift"] });
       assert.equal(
         await page.locator("#batch-summary").textContent(),
-        "4 tracks · 3 selected",
+        "4 tracks uploaded · 3 selected",
       );
       assert.match(
         await page.locator("#bulk-cover-note").textContent(),
@@ -648,7 +653,7 @@ export async function runBatchChecks({
       assert.ok(await page.locator("#bulk-genre").isDisabled());
       assert.match(
         await page.locator("#bulk-plan").textContent(),
-        /Changes Genre on 4 tracks/,
+        /Not applied yet: Genre on 4 tracks/,
       );
       await apply(page);
       assert.deepEqual(
@@ -798,7 +803,7 @@ export async function runBatchChecks({
       await page.locator("#album-cover-preview").waitFor({ state: "visible" });
       assert.match(
         await page.locator("#bulk-plan").textContent(),
-        /Changes Album, Genre and Cover art on 4 tracks/,
+        /Not applied yet: Album, Genre and Cover art on 4 tracks/,
       );
       await apply(page);
       for (const key of ["album", "genre", "cover"])
@@ -903,7 +908,7 @@ export async function runBatchChecks({
           await card(page, "slow.mp3")
             .getByRole("button", { name: "Remove track", exact: true })
             .click();
-        else await page.locator("#clear-batch").click();
+        else await clearAlbum(page);
         await upload(page, { ...audioFixture, name: "new.wav" });
         await field(card(page, "new.wav"), "title").fill("New file edit");
         await releaseMetadata(page);
@@ -976,7 +981,7 @@ export async function runBatchChecks({
         .locator("#file")
         .setInputFiles([mp3("slow.mp3", "First"), mp3("slow.mp3", "Second")]);
       await page.waitForFunction(() => window.__metadataWaitingCount === 2);
-      await page.locator("#clear-batch").click();
+      await clearAlbum(page);
       await upload(page, audioFixture);
       assert.equal(await page.locator(".track-row").count(), 1);
       await releaseMetadata(page);
@@ -1036,6 +1041,9 @@ export async function runBatchChecks({
         await page.locator("#status").textContent(),
         /3 complete, 1 failed/,
       );
+      assert.match(await page.locator("#album-download-help").textContent(), /Successful tracks only; 1 failed, 0 not processed/);
+      assert.ok(await page.locator("#album-download").isEnabled());
+      await page.screenshot({ path: join(outputRoot, "album-partial-results.png"), fullPage: true });
       assert.equal(
         await card(page, "broken.wav").locator(".track-status").textContent(),
         "Error",
@@ -1044,6 +1052,7 @@ export async function runBatchChecks({
       const telemetry = await page.evaluate(() => ({
         ...window.__decodes,
         stages: window.__workflow.samples.map((sample) => sample.status),
+        trackStatuses: window.__workflow.samples.flatMap((sample) => sample.trackStatuses),
       }));
       assert.equal(telemetry.max, 1, "only one decoder runs at a time");
       assert.equal(
@@ -1054,6 +1063,7 @@ export async function runBatchChecks({
       assert.ok(
         telemetry.stages.some((stage) => /Processing 4 of 4/.test(stage)),
       );
+      assert.ok(telemetry.trackStatuses.some((status) => /Converting · \d+%/.test(status)), "per-track conversion progress is visible");
       const downloading = page.waitForEvent("download");
       await page.locator("#album-download").click();
       const download = await downloading;
@@ -1105,8 +1115,8 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       }
       await field(card(page, "01.mp3"), "title").fill("Revised title");
       assert.ok(
-        await page.locator("#album-download").isHidden(),
-        "edits invalidate the previous ZIP",
+        await page.locator("#album-download").isDisabled(),
+        "edits disable the previous ZIP while keeping the action visible",
       );
       assert.ok(
         await card(page, "01.mp3").locator(".track-download").isHidden(),
@@ -1114,6 +1124,230 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       assert.ok(
         await card(page, "02.flac").locator(".track-download").isVisible(),
       );
+    },
+  );
+
+  await check(
+    "album UX: adjacent actions, disabled ZIP, unapplied edits, and keyboard download",
+    async (page) => {
+      await upload(page, discovery());
+      const download = page.locator("#album-download");
+      assert.ok(await download.isVisible());
+      assert.ok(await download.isDisabled());
+      assert.equal(await download.getAttribute("href"), null);
+      assert.match(await page.locator("#batch-summary").textContent(), /4 tracks uploaded · 0 selected/);
+      assert.ok(await page.locator("#apply-selected").isDisabled());
+      assert.ok(await page.locator("#remove-selected").isDisabled());
+      assert.ok(await row(page, 0).locator('[data-action="up"]').isDisabled());
+      assert.ok(await row(page, 3).locator('[data-action="down"]').isDisabled());
+      for (const width of [1440, 1024, 768]) {
+        await page.setViewportSize({ width, height: 900 });
+        const process = await page.locator("#submit-button").boundingBox();
+        const zip = await download.boundingBox();
+        assert.equal(process.y, zip.y, `actions share a row at ${width}px`);
+        assert.ok(zip.x > process.x && zip.x - (process.x + process.width) <= 12);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      }
+      await pick(page, 0, 1);
+      await page.locator("#bulk-album").fill("Pending album");
+      await page.locator("#submit-button").click();
+      assert.match(await page.locator("#status").textContent(), /have not been applied/);
+      assert.equal(await page.locator("#apply-selected").evaluate((el) => el === document.activeElement), true);
+      assert.equal(await field(row(page, 0), "album").inputValue(), "Discovery");
+      assert.equal(await page.locator(".track-download:visible").count(), 0);
+      await page.locator("#reset-bulk").click();
+      await exportTags(page);
+      assert.ok(await download.isEnabled());
+      assert.match(await page.locator("#album-download-help").textContent(), /ZIP ready · 4 of 4 tracks included/);
+      assert.equal(await page.locator("#submit-label").textContent(), "Reprocess Album");
+      assert.equal(await page.locator(".track-download:visible").count(), 4, "processing includes unselected tracks");
+      await download.focus();
+      const downloading = page.waitForEvent("download");
+      await page.keyboard.press("Enter");
+      assert.equal((await downloading).suggestedFilename(), "Discovery.zip");
+      await page.screenshot({ path: join(outputRoot, "album-actions-ready.png"), fullPage: true });
+      await page.setViewportSize({ width: 375, height: 900 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      assert.ok((await download.boundingBox()).width < 375);
+      await page.screenshot({ path: join(outputRoot, "album-actions-mobile.png"), fullPage: true });
+      await field(row(page, 0), "title").fill("Updated song");
+      assert.ok(await download.isVisible());
+      assert.ok(await download.isDisabled());
+      assert.equal(await download.getAttribute("href"), null);
+      assert.match(await page.locator("#album-download-help").textContent(), /updated ZIP/);
+    },
+  );
+
+  await check(
+    "album UX: bulk undo restores selected tags and artwork without changing other fields",
+    async (page) => {
+      await upload(page, discovery());
+      await pick(page, 0, 2);
+      const before = await rows(page);
+      await page.locator("#bulk-album").fill("Temporary");
+      await setMode(page, "track", "sequence");
+      await setMode(page, "cover", "clear");
+      await apply(page);
+      assert.ok(await page.locator("#undo-bulk").isVisible());
+      assert.equal(await field(row(page, 0), "album").inputValue(), "Temporary");
+      await page.locator("#undo-bulk").click();
+      const after = await rows(page);
+      assert.deepEqual(after.map(({ cover, ...values }) => values), before.map(({ cover, ...values }) => values));
+      assert.deepEqual(after.map((entry) => Boolean(entry.cover)), before.map((entry) => Boolean(entry.cover)));
+      assert.deepEqual(await coverBytes(page, after[0].cover), artworkFixture.buffer);
+      assert.match(await page.locator("#bulk-message").textContent(), /Undid/);
+      assert.ok(await page.locator("#undo-bulk").isHidden());
+      await page.locator("#bulk-album").fill("Next edit");
+      await apply(page);
+      await field(row(page, 0), "title").fill("Later manual edit");
+      assert.ok(await page.locator("#undo-bulk").isHidden(), "undo cannot overwrite a later manual edit");
+      const tags = await exportTags(page);
+      assert.equal(tags[0].TIT2, "Later manual edit");
+      assert.equal(tags[1].TALB, "Discovery");
+      assert.equal(tags[2].TALB, "Next edit");
+    },
+  );
+
+  await check(
+    "album UX: clear and remove-selected confirmations preserve edits when cancelled",
+    async (page) => {
+      await upload(page, discovery());
+      await field(row(page, 0), "title").fill("Keep this edit");
+      page.once("dialog", async (dialog) => {
+        assert.match(dialog.message(), /Clear all 4 tracks/);
+        await dialog.dismiss();
+      });
+      await page.locator("#clear-batch").click();
+      assert.equal(await page.locator(".track-row").count(), 4);
+      assert.equal(await field(row(page, 0), "title").inputValue(), "Keep this edit");
+      await pick(page, 1, 2);
+      page.once("dialog", (dialog) => dialog.dismiss());
+      await page.locator("#remove-selected").click();
+      assert.equal(await page.locator(".track-row").count(), 4);
+      page.once("dialog", (dialog) => dialog.accept());
+      await page.locator("#remove-selected").click();
+      assert.deepEqual(await names(page), ["01 One More Time.mp3", "04 Harder Better Faster Stronger.mp3"]);
+      await clearAlbum(page);
+      assert.equal(await page.locator(".track-row").count(), 0);
+      assert.ok(await page.locator("#album-download").isVisible());
+      assert.ok(await page.locator("#album-download").isDisabled());
+      assert.ok(await page.locator("#clear-batch").isDisabled());
+      assert.ok(await page.locator("#select-all-tracks").isDisabled());
+      assert.ok(await page.locator("#add-audio").evaluate((el) => el === document.activeElement));
+    },
+  );
+
+  await check(
+    "album UX: discarding a pending artwork read cannot reintroduce bulk changes",
+    async (page) => {
+      await upload(page, discovery());
+      await pick(page, 2);
+      await page.evaluate(() => {
+        const slice = File.prototype.slice;
+        const gate = new Promise((resolve) => { window.__releaseArtwork = resolve; });
+        File.prototype.slice = function (start, end) {
+          const blob = slice.call(this, start, end);
+          if (this.name === "pending.png") {
+            const read = blob.arrayBuffer.bind(blob);
+            blob.arrayBuffer = async () => {
+              window.__artworkWaiting = true;
+              await gate;
+              return read();
+            };
+          }
+          return blob;
+        };
+        window.__urlsBeforeArtwork = window.__workflow.created.length;
+      });
+      await page.locator("#album-cover").setInputFiles({ ...artworkFixture, name: "pending.png" });
+      await page.waitForFunction(() => window.__artworkWaiting);
+      assert.ok(await page.locator("#submit-button").isDisabled());
+      await page.locator("#reset-bulk").click();
+      assert.ok(await page.locator("#submit-button").isEnabled());
+      await page.evaluate(() => window.__releaseArtwork());
+      await page.waitForFunction(() => {
+        const urls = window.__workflow.created.slice(window.__urlsBeforeArtwork);
+        return urls.length && urls.every((url) => window.__workflow.revoked.includes(url));
+      });
+      assert.equal(await page.locator("#bulk-mode-cover").inputValue(), "keep");
+      assert.ok(await page.locator("#album-cover-preview").isHidden());
+      assert.ok(await page.locator("#apply-selected").isDisabled());
+    },
+  );
+
+  await check(
+    "album UX: stop keeps partial downloads and consistent counts for rejected files, then allows restart",
+    async (page) => {
+      await upload(page, [...discovery(), {
+        name: "rejected.txt", mimeType: "text/plain",
+        buffer: Buffer.from("This file is not a supported audio format."),
+      }]);
+      await page.evaluate(() => {
+        const read = File.prototype.arrayBuffer;
+        const gate = new Promise((resolve) => { window.__finishTrack = resolve; });
+        File.prototype.arrayBuffer = async function () {
+          if (this.name === "01 One More Time.mp3") {
+            window.__trackWaiting = true;
+            await gate;
+          }
+          return read.call(this);
+        };
+      });
+      await page.locator("#submit-button").click();
+      await page.waitForFunction(() => window.__trackWaiting);
+      assert.match(await page.locator("#submit-label").textContent(), /Processing… 1 \/ 5/);
+      assert.ok(await page.locator("#album-download").isDisabled());
+      assert.ok(await page.locator("#clear-batch").isDisabled());
+      assert.ok(await page.locator("#bulk-mode-album").isDisabled());
+      assert.equal(await page.locator("#album-progress-meter").getAttribute("value"), "0");
+      assert.match(await page.locator("#album-progress-label").textContent(), /0 of 5 finished/);
+      await page.screenshot({ path: join(outputRoot, "album-processing.png"), fullPage: true });
+      await page.locator("#stop-album").click();
+      assert.ok(await page.locator("#stop-album").isDisabled());
+      assert.match(await page.locator("#album-download-help").textContent(), /current track will finish/);
+      await page.evaluate(() => window.__finishTrack());
+      await settled(page);
+      assert.match(await page.locator("#status").textContent(), /Processing stopped: 1 complete, 1 failed, 3 not processed/);
+      assert.match(await page.locator("#album-download-help").textContent(), /Successful tracks only; 1 failed, 3 not processed/);
+      assert.equal(await page.locator("#album-progress-meter").getAttribute("value"), "1");
+      assert.equal(await page.locator(".track-download:visible").count(), 1);
+      assert.ok(await page.locator("#album-download").isEnabled());
+      assert.ok(await page.locator("#stop-album").isHidden());
+      const entries = await page.locator("#album-download").evaluate(async (link) => {
+        const bytes = await (await fetch(link.href)).arrayBuffer();
+        return new DataView(bytes).getUint16(bytes.byteLength - 12, true);
+      });
+      assert.equal(entries, 1, "the stopped album ZIP includes only the completed track");
+      await page.locator("#submit-button").click();
+      await settled(page);
+      assert.equal(await page.locator(".track-download:visible").count(), 4);
+      assert.match(await page.locator("#album-download-help").textContent(), /4 of 5 tracks included/);
+    },
+  );
+
+  await check(
+    "album UX: all failures keep ZIP disabled and long tables retain accessible sticky headers",
+    async (page) => {
+      await upload(page, Array.from({ length: 18 }, (_, index) => ({
+        name: `unsupported-${index}.txt`, mimeType: "text/plain",
+        buffer: Buffer.from("This is an unsupported file, not playable audio."),
+      })));
+      assert.equal(await page.locator('.track-row[data-status="error"]').count(), 18);
+      assert.match(await row(page, 0).locator(".track-error").textContent(), /not supported/);
+      const wrap = page.locator("#track-table-wrap");
+      await wrap.scrollIntoViewIfNeeded();
+      const headerTop = (await page.locator("#track-head th").first().boundingBox()).y;
+      await wrap.evaluate((el) => { el.scrollTop = 350; el.scrollLeft = 200; });
+      assert.equal((await page.locator("#track-head th").first().boundingBox()).y, headerTop);
+      assert.ok(await wrap.evaluate((el) => el.scrollHeight > el.clientHeight));
+      await wrap.focus();
+      assert.notEqual(await wrap.evaluate((el) => getComputedStyle(el).outlineStyle), "none");
+      await page.locator("#submit-button").click();
+      await settled(page);
+      assert.ok(await page.locator("#album-download").isVisible());
+      assert.ok(await page.locator("#album-download").isDisabled());
+      assert.match(await page.locator("#status").textContent(), /0 complete, 18 failed/);
+      assert.match(await page.locator("#status").textContent(), /retry/);
     },
   );
 

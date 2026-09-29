@@ -55,6 +55,13 @@ export function createBatchEditor(host) {
   const emptyNote = document.getElementById("album-empty");
   const summary = document.getElementById("batch-summary");
   const albumDownload = document.getElementById("album-download");
+  const downloadHelp = document.getElementById("album-download-help");
+  const feedback = document.getElementById("album-feedback");
+  const stopButton = document.getElementById("stop-album");
+  const albumProgress = document.getElementById("album-progress");
+  const progressMeter = document.getElementById("album-progress-meter");
+  const progressLabel = document.getElementById("album-progress-label");
+  const undoButton = document.getElementById("undo-bulk");
   const bulkFields = document.getElementById("bulk-fields");
   const bulkSelection = document.getElementById("bulk-selection");
   const bulkPlan = document.getElementById("bulk-plan");
@@ -72,6 +79,10 @@ export function createBatchEditor(host) {
   let archiveUrl = null;
   let currentTrack = null;
   let processingIndex = 0;
+  let processedCount = 0;
+  let hasProcessed = false;
+  let stopRequested = false;
+  let undo = null;
   let workers = 0;
   let anchor = null;
   const jobs = [];
@@ -86,6 +97,7 @@ export function createBatchEditor(host) {
     );
   const modeOf = (key) => document.getElementById(`bulk-mode-${key}`);
   const inputOf = (key) => document.getElementById(`bulk-${key}`);
+  const pendingEdits = () => BULK_KEYS.some((key) => modeOf(key).value !== "keep");
 
   bulkFields.insertAdjacentHTML(
     "afterbegin",
@@ -135,8 +147,10 @@ export function createBatchEditor(host) {
     if (!busy) host.setStatus("");
     retire(archiveUrl);
     archiveUrl = null;
-    albumDownload.hidden = true;
     albumDownload.removeAttribute("href");
+    albumDownload.removeAttribute("download");
+    albumDownload.setAttribute("aria-disabled", "true");
+    albumDownload.tabIndex = -1;
   }
 
   function invalidate(track) {
@@ -145,6 +159,38 @@ export function createBatchEditor(host) {
     track.result = null;
     if (!track.pending && !track.loadError) track.status = "Waiting";
     track.error = track.loadError || "";
+    track.percent = null;
+  }
+
+  function renderAlbumStatus() {
+    const completed = tracks.filter((track) => track.result).length;
+    const failed = tracks.filter((track) => track.status === "Error").length;
+    const waiting = tracks.length - completed - failed;
+    albumDownload.hidden = !active;
+    feedback.hidden = !active;
+    const ready = Boolean(archiveUrl) && !busy;
+    albumDownload.setAttribute("aria-disabled", String(!ready));
+    albumDownload.tabIndex = ready ? 0 : -1;
+    stopButton.hidden = !busy || !currentTrack || processingIndex >= tracks.length;
+    stopButton.disabled = stopRequested;
+    stopButton.textContent = stopRequested ? "Stopping after this track…" : "Stop after this track";
+    albumProgress.hidden = !busy;
+    progressMeter.max = tracks.length || 1;
+    progressMeter.value = processedCount;
+    progressLabel.textContent = `Album progress: ${processedCount} of ${tracks.length} finished · ${completed} complete · ${failed} failed`;
+    downloadHelp.textContent = busy
+      ? !currentTrack && processedCount
+        ? `Preparing a ZIP with ${plural(completed, "successful track")}…`
+        : stopRequested
+          ? "The current track will finish. Completed tracks will be available in the ZIP."
+          : `Processing all ${plural(tracks.length)}. The ZIP will include successful tracks only.`
+      : ready
+        ? `ZIP ready · ${completed} of ${plural(tracks.length)} included.${failed || waiting ? ` Successful tracks only; ${failed} failed, ${waiting} not processed.` : ""}`
+        : completed
+          ? "Album changed or ZIP unavailable. Process Album again to prepare an updated ZIP. Individual MP3s are still available."
+          : hasProcessed && failed
+            ? "No ZIP available: no tracks processed successfully. Check the track errors and process again."
+            : "Edit metadata → Process Album → Download Album ZIP. Processing includes all tracks; selection is for editing.";
   }
 
   function createRow(track) {
@@ -165,9 +211,9 @@ export function createBatchEditor(host) {
         <button type="button" class="cell-button" data-action="cover-remove" aria-label="Clear artwork">Clear</button>
       </div></td>
       <td class="col-file"><span class="track-filename" id="${name}"></span><span class="track-format"></span></td>
-      <td class="col-status"><span class="track-status" role="status"></span>
+      <td class="col-status"><span class="track-status" role="status" aria-atomic="true"></span>
         <a class="download-link track-download" hidden>Download MP3</a>
-        <p class="track-error" role="alert" hidden></p></td>
+        <p class="track-error" id="${track.id}-error" role="alert" hidden></p></td>
       <td class="col-actions"><div class="row-actions">
         <button type="button" class="cell-button" data-action="up" aria-label="Move track up">↑</button>
         <button type="button" class="cell-button" data-action="down" aria-label="Move track down">↓</button>
@@ -176,6 +222,7 @@ export function createBatchEditor(host) {
     row
       .querySelector("[data-select]")
       .setAttribute("aria-label", `Select ${track.file.name}`);
+    row.querySelector('[data-field="track"]').setAttribute("aria-describedby", `${track.id}-error`);
     return row;
   }
 
@@ -189,7 +236,7 @@ export function createBatchEditor(host) {
       : "Checking";
     row.querySelector(".track-status").textContent = track.coverPending
       ? "Reading artwork"
-      : track.status;
+      : `${track.status}${track.percent == null ? "" : ` · ${track.percent}%`}`;
     row.dataset.status = track.status.toLowerCase();
     row.classList.toggle("is-selected", track.selected);
     row.querySelector("[data-select]").checked = track.selected;
@@ -210,7 +257,9 @@ export function createBatchEditor(host) {
     row.querySelector('[data-action="cover-remove"]').hidden =
       !track.coverUrl && !track.coverPending;
     const error = row.querySelector(".track-error");
-    error.textContent = track.error || track.coverError || "";
+    error.textContent = !validTrack(track.values.track)
+      ? "Use a track number from 1–9999, or track/total (e.g. 3/10)."
+      : track.error || track.coverError || "";
     error.hidden = !error.textContent;
     const link = row.querySelector(".track-download");
     link.hidden = !track.result;
@@ -231,6 +280,7 @@ export function createBatchEditor(host) {
       const input = inputOf(key);
       input.closest(".bulk-row").dataset.mode = mode;
       input.disabled = busy || mode === "clear";
+      modeOf(key).disabled = busy;
       input.setAttribute(
         "aria-label",
         mode === "sequence"
@@ -259,6 +309,8 @@ export function createBatchEditor(host) {
           mode === "sequence" ? "1" : `New ${label.toLowerCase()}`;
     }
     const coverMode = modeOf("cover").value;
+    modeOf("cover").disabled = busy;
+    sharedCoverInput.disabled = busy;
     let preview = null;
     sharedCoverInput.closest(".bulk-row").dataset.mode = coverMode;
     if (coverMode === "keep") {
@@ -286,11 +338,14 @@ export function createBatchEditor(host) {
       ? `Apply to ${plural(count, "selected track")}`
       : "Apply to selected tracks";
     applyButton.disabled = busy || shared.pending || !count || !changing.length;
+    document.getElementById("reset-bulk").disabled = busy || (!changing.length && !shared.pending && !bulkFields.querySelector('[aria-invalid="true"]'));
+    undoButton.hidden = !undo;
+    undoButton.disabled = busy || !undo;
     bulkPlan.textContent = !count
       ? "Select tracks in the table below to edit them together."
       : !changing.length
         ? "Choose Set or Clear on only the fields you want to change."
-        : `Changes ${listLabels(changing)} on ${plural(count)}. Everything else stays as is.`;
+        : `Not applied yet: ${listLabels(changing)} on ${plural(count)}. Everything else stays as is.${modeOf("track").value === "sequence" ? " Numbers follow the current table order." : ""}`;
   }
 
   function render() {
@@ -300,12 +355,15 @@ export function createBatchEditor(host) {
         list.insertBefore(track.row, list.children[index] || null);
     });
     const selected = selection().length;
-    summary.textContent = `${plural(tracks.length)} · ${selected} selected`;
+    const completed = tracks.filter((track) => track.result).length;
+    const failed = tracks.filter((track) => track.status === "Error").length;
+    summary.textContent = `${plural(tracks.length)} uploaded · ${selected} selected${hasProcessed || failed ? ` · ${completed} complete · ${failed} failed` : ""}`;
     tableWrap.hidden = !tracks.length;
     emptyNote.hidden = Boolean(tracks.length);
     selectAll.checked = tracks.length > 0 && selected === tracks.length;
     selectAll.indeterminate = selected > 0 && selected < tracks.length;
     host.updateActions();
+    renderAlbumStatus();
   }
 
   function showError(key, message = "") {
@@ -366,6 +424,15 @@ export function createBatchEditor(host) {
         ).focus();
       return;
     }
+    // Undo is offered once source reads have settled, so it cannot restore an
+    // incomplete metadata snapshot over tags that arrived in the meantime.
+    undo = targets.some((track) => track.pending || track.coverPending) ? null : {
+      keys,
+      entries: targets.map((track) => ({
+        track, values: { ...track.values }, cover: track.cover,
+        edited: new Set(track.edited), coverEdited: track.coverEdited,
+      })),
+    };
     for (const [track, next] of applyPatch(tracks, patch)) {
       for (const key of FIELD_KEYS) if (patch[key]) track.edited.add(key);
       track.values = next.values;
@@ -380,7 +447,7 @@ export function createBatchEditor(host) {
   }
 
   function openBulkField(key) {
-    if (busy) return;
+    if (busy || !selection().length) return;
     const mode = modeOf(key);
     if (mode.value === "keep") mode.value = "set";
     showError(key);
@@ -410,6 +477,7 @@ export function createBatchEditor(host) {
 
   async function setCover(track, file, userEdit = true) {
     if (!alive(track)) return;
+    if (userEdit) undo = null;
     if (userEdit) track.coverEdited = true;
     const version = ++track.coverVersion;
     track.coverPending = Boolean(file);
@@ -506,6 +574,7 @@ export function createBatchEditor(host) {
 
   async function add(files, importMetadata, seed = null) {
     if (busy) return;
+    undo = null;
     active = true;
     root.hidden = false;
     clearArchive();
@@ -559,6 +628,9 @@ export function createBatchEditor(host) {
 
   function remove(track) {
     if (busy || !alive(track)) return;
+    undo = null;
+    const wasFocused = track.row.contains(document.activeElement);
+    const next = tracks[tracks.indexOf(track) + 1] || tracks[tracks.indexOf(track) - 1];
     orderVersion++;
     invalidate(track);
     if (track.coverUrl) URL.revokeObjectURL(track.coverUrl);
@@ -566,6 +638,7 @@ export function createBatchEditor(host) {
     track.releaseRead?.();
     track.row.remove();
     render();
+    if (wasFocused) (next?.row.querySelector("[data-select]") || document.getElementById("add-audio")).focus();
   }
 
   function clear() {
@@ -579,12 +652,25 @@ export function createBatchEditor(host) {
     sharedCoverInput.value = "";
     resetBulk();
     bulkMessage.textContent = "";
+    hasProcessed = false;
+    processedCount = 0;
     render();
   }
 
   async function process() {
     if (busy || reading() || shared.pending || !tracks.length) return;
+    if (pendingEdits()) {
+      host.setStatus("Bulk changes have not been applied. Apply to selected tracks or Discard changes before processing.", "err");
+      (applyButton.disabled ? document.getElementById("reset-bulk") : applyButton).focus();
+      return;
+    }
+    const focusedControl = document.activeElement;
     busy = true;
+    hasProcessed = true;
+    stopRequested = false;
+    processedCount = 0;
+    processingIndex = 0;
+    undo = null;
     for (const track of tracks) invalidate(track);
     host.setBusy(true);
     render();
@@ -592,8 +678,12 @@ export function createBatchEditor(host) {
     const usedNames = new Set();
     try {
       for (const [index, track] of tracks.entries()) {
+        if (stopRequested) break;
         currentTrack = track;
         processingIndex = index + 1;
+        track.status = "Reading audio";
+        host.setStatus(`Processing ${processingIndex} of ${tracks.length} · ${track.file.name}`);
+        render();
         try {
           if (track.loadError) throw new Error(track.loadError);
           if (!validTrack(track.values.track))
@@ -630,9 +720,13 @@ export function createBatchEditor(host) {
             error.message ||
             "This track could not be processed. Try another source file.";
         }
+        track.percent = null;
+        processedCount++;
         render();
       }
       currentTrack = null;
+      host.updateActions();
+      renderAlbumStatus();
       if (completed) {
         host.setStatus("Preparing album ZIP…");
         const blob = await createZip(
@@ -648,11 +742,11 @@ export function createBatchEditor(host) {
         const album = albums.size === 1 ? [...albums][0] : "Tagged album";
         albumDownload.href = archiveUrl;
         albumDownload.download = `${[...host.safeName(album)].slice(0, 100).join("") || "Tagged album"}.zip`;
-        albumDownload.hidden = false;
       }
+      const failed = tracks.filter((track) => track.status === "Error").length;
       host.setStatus(
-        `Album processed: ${completed} complete, ${tracks.length - completed} failed.${completed ? " Download your album or individual tracks." : " Check the errors beside each track."}`,
-        completed ? "ok" : "err",
+        `${stopRequested ? "Processing stopped" : "Album processed"}: ${completed} complete, ${failed} failed${stopRequested ? `, ${tracks.length - completed - failed} not processed` : ""}.${completed ? " Download Album ZIP or individual MP3s." : ""}${failed ? " Check the errors beside each track, then Process Album to retry." : ""}${stopRequested ? " Process Album again to restart." : ""}`,
+        failed || !completed ? "err" : "ok",
       );
     } catch (error) {
       host.setStatus(
@@ -664,6 +758,9 @@ export function createBatchEditor(host) {
       busy = false;
       host.finishProcessing();
       render();
+      if (document.activeElement === document.body || document.activeElement === stopButton || document.activeElement === focusedControl) {
+        document.getElementById("submit-button").focus({ preventScroll: true });
+      }
     }
   }
 
@@ -671,6 +768,7 @@ export function createBatchEditor(host) {
     const track = trackFor(event.target);
     const key = event.target.dataset.field;
     if (busy || !track || !key) return;
+    undo = null;
     track.values[key] = event.target.value;
     track.edited.add(key);
     if (key === "track") orderVersion++;
@@ -757,7 +855,53 @@ export function createBatchEditor(host) {
     event.preventDefault();
     applyBulk();
   });
-  document.getElementById("clear-batch").addEventListener("click", clear);
+  document.getElementById("clear-batch").addEventListener("click", () => {
+    if (busy || !tracks.length) return;
+    if (window.confirm(`Clear all ${plural(tracks.length)}? Metadata edits and prepared downloads will be removed. Your original files will stay on your device.`)) {
+      clear();
+      document.getElementById("add-audio").focus();
+    }
+  });
+  document.getElementById("remove-selected").addEventListener("click", () => {
+    const targets = selection();
+    if (busy || !targets.length) return;
+    if (window.confirm(`Remove ${plural(targets.length, "selected track")}? Their metadata edits and prepared downloads will be removed. Your original files will stay on your device.`)) {
+      targets.forEach(remove);
+      (tracks[0]?.row.querySelector("[data-select]") || document.getElementById("add-audio")).focus();
+    }
+  });
+  stopButton.addEventListener("click", () => {
+    if (!busy || !currentTrack) return;
+    stopRequested = true;
+    renderAlbumStatus();
+  });
+  albumDownload.addEventListener("click", (event) => {
+    if (busy || !archiveUrl) event.preventDefault();
+  });
+  undoButton.addEventListener("click", () => {
+    if (busy || !undo) return;
+    const { entries, keys } = undo;
+    undo = null;
+    for (const entry of entries) {
+      const { track } = entry;
+      if (!alive(track)) continue;
+      for (const key of keys) {
+        if (key === "cover") {
+          replaceCover(track, entry.cover);
+          track.coverEdited = entry.coverEdited;
+        } else {
+          track.values[key] = entry.values[key];
+          if (entry.edited.has(key)) track.edited.add(key);
+          else track.edited.delete(key);
+        }
+      }
+      invalidate(track);
+    }
+    if (keys.includes("track")) orderVersion++;
+    bulkMessage.textContent = `Undid ${listLabels(keys)} on ${plural(entries.length)}.`;
+    render();
+    selectAll.focus();
+  });
   document.getElementById("sort-tracks").addEventListener("click", () => {
     if (busy) return;
     orderVersion++;
@@ -768,9 +912,13 @@ export function createBatchEditor(host) {
   applyButton.addEventListener("click", applyBulk);
   document.getElementById("reset-bulk").addEventListener("click", () => {
     if (busy) return;
+    shared.version++;
+    shared.pending = false;
+    sharedCoverInput.value = "";
     resetBulk();
     bulkMessage.textContent = "";
-    renderBulk();
+    host.setStatus("");
+    render();
   });
   sharedCoverInput.addEventListener("change", async () => {
     const file = sharedCoverInput.files?.[0];
@@ -816,11 +964,18 @@ export function createBatchEditor(host) {
     get count() {
       return tracks.length;
     },
+    get actionLabel() {
+      if (!busy) return hasProcessed ? "Reprocess Album" : "Process Album";
+      return currentTrack || !processedCount
+        ? `Processing… ${processingIndex} / ${tracks.length}`
+        : "Preparing ZIP…";
+    },
     add,
     process,
     clear,
     stage(label) {
       if (!currentTrack) return label;
+      currentTrack.percent = null;
       currentTrack.status = /metadata|artwork/i.test(label)
         ? "Tagging"
         : /decod|creating/i.test(label)
@@ -829,11 +984,29 @@ export function createBatchEditor(host) {
       renderTrack(currentTrack);
       return `Processing ${processingIndex} of ${tracks.length} · ${label}`;
     },
+    progress(percent) {
+      if (!currentTrack) return;
+      currentTrack.percent = percent;
+      renderTrack(currentTrack);
+    },
     updateControls(processing) {
       root.querySelectorAll("input, button, select").forEach((control) => {
         control.disabled = processing;
       });
-      if (!processing) renderBulk();
+      if (!processing) {
+        const count = selection().length;
+        selectAll.disabled = !tracks.length;
+        selectAll.setAttribute("aria-label", selectAll.checked ? "Deselect all tracks" : "Select all tracks");
+        document.getElementById("clear-batch").disabled = !tracks.length;
+        document.getElementById("remove-selected").disabled = !count;
+        document.getElementById("sort-tracks").disabled = tracks.length < 2 || reading();
+        head.querySelectorAll("button").forEach((button) => { button.disabled = !count; });
+        tracks.forEach((track, index) => {
+          track.row.querySelector('[data-action="up"]').disabled = index === 0;
+          track.row.querySelector('[data-action="down"]').disabled = index === tracks.length - 1;
+        });
+        renderBulk();
+      }
     },
     dispose() {
       for (const track of tracks) {
