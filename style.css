@@ -513,6 +513,77 @@ form {
   font-size: 0.85rem;
 }
 
+.file-section > .metadata-toggle {
+  margin: 20px 0 0;
+}
+
+#add-audio { margin-top: 14px; }
+
+.batch-editor {
+  padding: 26px 30px;
+  border-top: 1px solid var(--border);
+}
+
+.bulk-fields,
+.track-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.album-artwork,
+.batch-toolbar,
+.track-card-heading,
+.track-card-footer,
+.track-order-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.album-artwork,
+.batch-toolbar { margin-top: 16px; }
+.track-toolbar { padding-top: 18px; border-top: 1px solid var(--border); }
+.batch-editor input[type="checkbox"] { accent-color: var(--accent); }
+.batch-editor .quiet-button { border: 1px solid var(--border-strong); }
+.batch-editor label { cursor: pointer; }
+.album-artwork img,
+.track-cover { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; }
+
+.track-card {
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-input);
+  min-width: 0;
+}
+
+.track-card-heading { margin-bottom: 16px; font-size: 0.9rem; }
+.track-selection { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 1 220px; }
+.track-filename { overflow-wrap: anywhere; }
+.track-format { font-family: var(--font-mono); color: var(--text-soft); }
+.track-status { color: var(--text-soft); }
+.track-card[data-status="error"] { border-color: var(--danger-border); }
+.track-card[data-status="error"] .track-status { color: var(--danger); }
+.track-card[data-status="complete"] .track-status { color: var(--accent); }
+.track-card-footer { margin-top: 16px; }
+.track-order-actions { margin-left: auto; }
+.album-download { display: inline-block; margin-top: 22px; }
+.track-card:has([data-cover]:focus-visible) .track-cover-picker,
+.album-artwork:has(#album-cover:focus-visible) label[for="album-cover"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+  .batch-editor { padding: 22px 18px; }
+  .bulk-fields, .track-fields { grid-template-columns: minmax(0, 1fr); }
+  .track-card { padding: 14px; }
+  .track-order-actions { margin-left: 0; }
+}
+
 .metadata-fields {
   display: grid;
   grid-template-columns: minmax(0, 0.45fr) minmax(0, 0.55fr);

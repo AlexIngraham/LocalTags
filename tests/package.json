@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "test": "npm run test:metadata && npm run test:workflow",
+    "test": "npm run test:metadata && npm run test:zip && npm run test:workflow",
+    "test:zip": "node --test zip.mjs",
     "test:metadata": "node --test metadata.mjs",
     "test:workflow": "node workflow.mjs"
   },

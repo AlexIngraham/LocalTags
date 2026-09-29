@@ -52,7 +52,8 @@
               class="visually-hidden-file"
               type="file"
               name="file"
-              aria-label="Choose source audio"
+              multiple
+              aria-label="Choose source audio files"
               aria-describedby="audio-formats audio-error"
               accept="audio/mpeg,audio/wav,audio/wave,audio/x-wav,audio/flac,audio/aiff,audio/x-aiff,audio/mp4,audio/x-m4a,audio/m4a,audio/aac,audio/ogg,audio/vorbis,.mp3,.wav,.flac,.aiff,.aif,.m4a,.aac,.ogg,.oga"
             />
@@ -64,10 +65,10 @@
                   <path d="M5 14.75v3A2.25 2.25 0 0 0 7.25 20h9.5A2.25 2.25 0 0 0 19 17.75v-3" />
                 </svg>
               </span>
-              <span class="drop-title" id="drop-title">Drop an audio file here</span>
-              <span class="drop-choice"><span>or</span> choose a file</span>
+              <span class="drop-title" id="drop-title">Drop audio files here</span>
+              <span class="drop-choice"><span>or</span> choose files</span>
               <span class="drop-formats" id="audio-formats">
-                MP3, WAV, FLAC, AIFF, M4A, AAC, OGG · Up to 200 MB
+                MP3, WAV, FLAC, AIFF, M4A, AAC, OGG · Up to 200 MB per file
               </span>
             </label>
 
@@ -100,17 +101,7 @@
             </div>
 
             <p class="field-message" id="audio-error" role="alert" hidden></p>
-          </section>
-
-          <section class="editor-section" id="editor-section" aria-labelledby="editor-title">
-            <div class="section-heading editor-heading">
-              <p class="step-label">Track details</p>
-              <div>
-                <h2 id="editor-title">Metadata &amp; artwork</h2>
-                <p id="metadata-note" aria-live="polite">All details are optional. Existing tags are filled in when available.</p>
-              </div>
-            </div>
-
+            <button class="quiet-button" type="button" id="add-audio">Add files to album</button>
             <label class="metadata-toggle" for="import-metadata">
               <input id="import-metadata" type="checkbox" checked aria-describedby="import-metadata-help" />
               <span>
@@ -118,6 +109,65 @@
                 <small id="import-metadata-help">Applies to the next upload. Turn off to start with blank details and artwork.</small>
               </span>
             </label>
+
+          </section>
+
+          <section id="batch-editor" class="batch-editor" aria-labelledby="batch-title" hidden>
+            <div class="section-heading">
+              <p class="step-label">Album</p>
+              <div>
+                <h2 id="batch-title">Shared album details</h2>
+                <p>Choose the fields to copy, then apply them to all tracks or your selection. Checked empty fields clear existing values.</p>
+              </div>
+            </div>
+            <div class="bulk-fields">
+              <div class="field">
+                <label><input id="use-album" data-bulk-use type="checkbox" /> Apply album</label>
+                <input id="bulk-album" type="text" aria-label="Shared album" placeholder="Album name" />
+              </div>
+              <div class="field">
+                <label><input id="use-albumArtist" data-bulk-use type="checkbox" /> Apply album artist</label>
+                <input id="bulk-albumArtist" type="text" aria-label="Shared album artist" placeholder="Album artist" />
+              </div>
+              <div class="field">
+                <label><input id="use-genre" data-bulk-use type="checkbox" /> Apply genre</label>
+                <input id="bulk-genre" type="text" aria-label="Shared genre" placeholder="Genre" />
+              </div>
+            </div>
+            <div class="album-artwork">
+              <label><input id="use-cover" data-bulk-use type="checkbox" /> Apply cover art</label>
+              <img id="album-cover-preview" alt="Shared album artwork" hidden />
+              <label class="quiet-button" for="album-cover">Choose album artwork</label>
+              <input id="album-cover" class="visually-hidden-file" type="file" accept="image/jpeg,image/png,image/gif,image/webp" />
+              <button class="text-button" type="button" id="clear-album-cover">Use no artwork</button>
+              <span class="field-hint">JPEG, PNG, GIF or WebP · Up to 10 MB</span>
+            </div>
+            <div class="batch-toolbar">
+              <button class="quiet-button" type="button" id="apply-all">Apply to all tracks</button>
+              <button class="quiet-button" type="button" id="apply-selected">Apply to selected tracks</button>
+            </div>
+            <p id="bulk-message" class="field-hint" role="status"></p>
+            <div class="batch-toolbar track-toolbar">
+              <label><input id="select-all-tracks" type="checkbox" /> Select all</label>
+              <span id="batch-summary" role="status"></span>
+              <button class="quiet-button" type="button" id="sort-tracks">Sort by track / filename</button>
+              <button class="quiet-button" type="button" id="number-tracks">Auto-number tracks</button>
+              <button class="quiet-button" type="button" id="clear-batch">Clear album</button>
+            </div>
+            <p class="field-hint">Track numbers are kept unless you choose Auto-number. Use the arrows to change the order.</p>
+            <div id="track-list" aria-label="Album tracks"></div>
+            <a class="download-link album-download" id="album-download" hidden>Download Album ZIP</a>
+          </section>
+
+          <section class="editor-section" id="editor-section" aria-labelledby="editor-title">
+            <div id="single-editor">
+            <div class="section-heading editor-heading">
+              <p class="step-label">Track details</p>
+              <div>
+                <h2 id="editor-title">Metadata &amp; artwork</h2>
+                <p id="metadata-note" aria-live="polite">All details are optional. Existing tags are filled in when available.</p>
+              </div>
+            </div>
 
             <div class="editor-grid">
               <div class="metadata-fields">
@@ -152,6 +202,11 @@
                     placeholder="Album name"
                     autocomplete="off"
                   />
+                </div>
+
+                <div class="field field-wide">
+                  <label for="albumArtist">Album artist</label>
+                  <input id="albumArtist" type="text" name="albumArtist" placeholder="Album artist" autocomplete="off" />
                 </div>
 
                 <div class="field field-track">
@@ -215,6 +270,8 @@
                 <p class="field-hint" id="cover-help">JPEG, PNG, GIF or WebP · Up to 10 MB</p>
                 <p class="field-message cover-message" id="cover-error" role="alert" hidden></p>
               </div>
+            </div>
+
             </div>
 
             <div class="action-panel">

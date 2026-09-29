@@ -7,6 +7,7 @@ const MAX_TEXT_BYTES = 64 * 1024;
 
 const ID3_FIELDS = {
   TIT2: "title", TT2: "title", TPE1: "artist", TP1: "artist",
+  TPE2: "albumArtist", TP2: "albumArtist",
   TALB: "album", TAL: "album", TRCK: "track", TRK: "track",
   TCON: "genre", TCO: "genre",
 };
@@ -167,7 +168,7 @@ function readVorbis(bytes, metadata) {
   let offset = 4 + vendorLength;
   const count = Math.min(uint(bytes, offset, 4, true), MAX_BLOCKS);
   offset += 4;
-  const fields = { TITLE: "title", ARTIST: "artist", ALBUM: "album", TRACKNUMBER: "track", GENRE: "genre" };
+  const fields = { TITLE: "title", ARTIST: "artist", ALBUM: "album", ALBUMARTIST: "albumArtist", "ALBUM ARTIST": "albumArtist", TRACKNUMBER: "track", GENRE: "genre" };
   let total;
   for (let i = 0; i < count && offset + 4 <= bytes.length; i++) {
     const length = uint(bytes, offset, 4, true);
@@ -267,7 +268,7 @@ async function readWave(read, size, metadata, state) {
 
 /**
  * Best-effort browser File/Blob metadata reader. Returns available string fields
- * title, artist, album, track, genre; optional cover (File) and duration (seconds).
+ * title, artist, album, albumArtist, track, genre; optional cover (File) and duration (seconds).
  * Supports ID3v2.2/2.3/2.4 + ID3v1, native FLAC, and RIFF WAV INFO/ID3.
  * Unsupported formats, oversized tags, and corrupt blocks are quietly skipped.
  */

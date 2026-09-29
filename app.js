@@ -1,4 +1,5 @@
 import { readSourceMetadata } from "./metadata.js";
+import { createBatchEditor } from "./batch.js";
 
 const form = document.getElementById("edit-form");
 const workspace = document.getElementById("workspace");
@@ -17,7 +18,7 @@ const removeAudioBtn = document.getElementById("remove-audio");
 const fileDurationEl = document.getElementById("file-duration");
 const metadataNote = document.getElementById("metadata-note");
 const importMetadataInput = document.getElementById("import-metadata");
-const fields = Object.fromEntries(["title", "artist", "album", "track", "genre"].map((name) => [name, document.getElementById(name)]));
+const fields = Object.fromEntries(["title", "artist", "album", "albumArtist", "track", "genre"].map((name) => [name, document.getElementById(name)]));
 const trackError = document.getElementById("track-error");
 const coverInput = document.getElementById("cover");
 const coverDrop = document.getElementById("cover-drop");
@@ -41,6 +42,14 @@ const submitLabel = document.getElementById("submit-label");
 const MP3_BITRATE = 192;
 const MAX_AUDIO_BYTES = 200_000_000;
 const MAX_COVER_BYTES = 10_000_000;
+const addAudioBtn = document.getElementById("add-audio");
+const albumFilesInput = fileInput.cloneNode();
+albumFilesInput.id = "album-files";
+albumFilesInput.name = "album-files";
+albumFilesInput.tabIndex = -1;
+albumFilesInput.setAttribute("aria-label", "Add audio files to album");
+fileInput.before(albumFilesInput);
+let batch = null;
 
 let downloadUrl = null;
 let coverPreviewUrl = null;
@@ -78,6 +87,7 @@ function setProgress(ratio) {
 }
 
 async function setStage(label, determinate = false) {
+  if (batch?.active) label = batch.stage(label);
   progressEl.hidden = false;
   progressStage.textContent = label;
   progressMeter.setAttribute("aria-label", label);
@@ -600,6 +610,7 @@ async function writeMp3Tags({
   title,
   artist,
   album,
+  albumArtist,
   track,
   genre,
   coverBuffer,
@@ -614,6 +625,7 @@ async function writeMp3Tags({
   if (title) writer.setFrame("TIT2", title);
   if (artist) writer.setFrame("TPE1", [artist]);
   if (album) writer.setFrame("TALB", album);
+  if (albumArtist) writer.setFrame("TPE2", albumArtist);
   if (track) writer.setFrame("TRCK", track);
   if (genre) writer.setFrame("TCON", [genre]);
   if (coverBuffer) {
@@ -659,11 +671,15 @@ function setCoverError(message) {
   coverInput.setAttribute("aria-invalid", String(Boolean(message)));
 }
 
-function validateTrack() {
-  const value = fields.track.value.trim();
+function validTrack(value) {
+  value = value.trim();
   const parts = value.split("/").map(Number);
-  const valid = !value || (/^\d{1,4}(\/\d{1,4})?$/.test(value) &&
+  return !value || (/^\d{1,4}(\/\d{1,4})?$/.test(value) &&
     parts.every((part) => part > 0) && (parts.length === 1 || parts[0] <= parts[1]));
+}
+
+function validateTrack() {
+  const valid = validTrack(fields.track.value);
   trackError.textContent = valid ? "" : "Use a track from 1–9999, or track/total (e.g. 3/10). The total must be at least the track number.";
   trackError.hidden = valid;
   fields.track.setAttribute("aria-invalid", String(!valid));
@@ -732,6 +748,23 @@ function renderCoverState() {
 }
 
 function updateActionAvailability() {
+  addAudioBtn.disabled = isProcessing;
+  albumFilesInput.disabled = isProcessing;
+  if (batch?.active) {
+    audioDrop.hidden = false;
+    fileSummary.hidden = true;
+    fileInput.tabIndex = 0;
+    fileInput.disabled = isProcessing;
+    workspaceDescription.textContent = "Add more tracks to your album. Your audio stays in this browser.";
+    submitBtn.disabled = isProcessing || batch.checking || !batch.count;
+    submitLabel.textContent = isProcessing ? "Processing album…" : batch.checking ? "Checking files…" : batch.count ? "Process Album" : "Add audio files first";
+    if (!isProcessing && !statusEl.classList.contains("ok") && !statusEl.classList.contains("err")) {
+      setStatus(batch.checking ? "Reading album files…" : batch.count
+        ? "Ready to process. Tracks will be converted one at a time." : "Add audio files to begin.");
+    }
+    batch.updateControls(isProcessing);
+    return;
+  }
   const checking = isReadingAudio || isReadingMetadata || Boolean(pendingCover);
   submitBtn.disabled = isProcessing || checking || !selectedAudioFile;
   submitLabel.textContent = isProcessing ? "Creating your MP3…"
@@ -822,6 +855,31 @@ function removeAudio() {
   fileInput.focus();
 }
 
+async function inspectAudio(file) {
+  if (file.size > MAX_AUDIO_BYTES) throw new ProcessingError("This file is too large. Choose audio up to 200 MB.");
+  if (file.size < 16) throw new ProcessingError("This file is empty or incomplete. Choose a different audio file.");
+  const header = await file.slice(0, 512_000).arrayBuffer();
+  const format = detectFormat(file, header);
+  if (!format) throw new ProcessingError("File not supported. Choose an MP3, WAV, FLAC, AIFF, M4A, AAC, or OGG file.");
+  return format;
+}
+
+async function validateArtwork(file) {
+  if (file.size > MAX_COVER_BYTES) throw new ProcessingError("This image is too large. Choose artwork up to 10 MB.");
+  const header = await file.slice(0, 16).arrayBuffer();
+  if (!coverMime(header)) throw new ProcessingError("Artwork must be a JPEG, PNG, GIF, or WebP image.");
+  const url = URL.createObjectURL(file);
+  try {
+    const probe = new Image();
+    probe.src = url;
+    await probe.decode();
+    return url;
+  } catch {
+    URL.revokeObjectURL(url);
+    throw new ProcessingError("This image could not be opened. Choose another JPEG, PNG, GIF, or WebP image.");
+  }
+}
+
 async function selectAudioFile(file) {
   if (!file || isProcessing) return;
   const token = ++selectionToken;
@@ -834,18 +892,8 @@ async function selectAudioFile(file) {
   updateActionAvailability();
 
   try {
-    if (file.size > MAX_AUDIO_BYTES) {
-      throw new ProcessingError("This file is too large. Choose audio up to 200 MB.");
-    }
-    if (file.size < 16) {
-      throw new ProcessingError("This file is empty or incomplete. Choose a different audio file.");
-    }
-    const header = await file.slice(0, 512_000).arrayBuffer();
+    const format = await inspectAudio(file);
     if (token !== selectionToken) return;
-    const format = detectFormat(file, header);
-    if (!format) {
-      throw new ProcessingError("File not supported. Choose an MP3, WAV, FLAC, AIFF, M4A, AAC, or OGG file.");
-    }
 
     // A rejected candidate must not cancel metadata still being read for the
     // current source. Validation and committed-source reads have separate tokens.
@@ -909,24 +957,14 @@ async function selectCoverFile(file, { origin = "user", sourceToken } = {}) {
   if (!file || isProcessing) return;
   // Keep pending and committed provenance separate: a rejected replacement must
   // not make the previous source's artwork look like a deliberate user choice.
-  const selection = { origin, sourceToken };
+  const selection = { origin, sourceToken, file };
   pendingCover = selection;
   setCoverError("");
   coverDrop.classList.add("is-checking");
   updateActionAvailability();
   let nextPreviewUrl = null;
   try {
-    if (file.size > MAX_COVER_BYTES) {
-      throw new ProcessingError("This image is too large. Choose artwork up to 10 MB.");
-    }
-    const header = await file.slice(0, 16).arrayBuffer();
-    if (!coverMime(header)) {
-      throw new ProcessingError("Artwork must be a JPEG, PNG, GIF, or WebP image.");
-    }
-    nextPreviewUrl = URL.createObjectURL(file);
-    const probe = new Image();
-    probe.src = nextPreviewUrl;
-    await probe.decode();
+    nextPreviewUrl = await validateArtwork(file);
     if (pendingCover !== selection || (origin === "source" && sourceToken !== sourceSelectionToken)) return;
     if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
     coverPreviewUrl = nextPreviewUrl;
@@ -950,7 +988,7 @@ async function selectCoverFile(file, { origin = "user", sourceToken } = {}) {
   }
 }
 
-function wireDropTarget(target, onFile, onError) {
+function wireDropTarget(target, onFile, onError, multiple = false) {
   let dragDepth = 0;
   target.addEventListener("dragenter", (event) => {
     event.preventDefault();
@@ -973,12 +1011,54 @@ function wireDropTarget(target, onFile, onError) {
     target.classList.remove("is-drag-active");
     if (isProcessing) return;
     const files = event.dataTransfer?.files;
-    if (files?.length > 1) onError("Choose one file at a time.");
+    if (multiple && files?.length) onFile([...files]);
+    else if (files?.length > 1) onError("Choose one file at a time.");
     else if (files?.[0]) onFile(files[0]);
   });
 }
 
-fileInput.addEventListener("change", () => selectAudioFile(fileInput.files?.[0]));
+function addToBatch(files) {
+  if (!files.length || isProcessing) return;
+  setAudioError("");
+  let seed = null;
+  if (!batch.active) {
+    if (selectedAudioFile) seed = {
+      file: selectedAudioFile, format: selectedAudioFormat,
+      values: Object.fromEntries(Object.entries(fields).map(([key, input]) => [key, input.value])),
+      edited: [...editedFields], cover: selectedCoverFile, coverEdited: coverOrigin === "user",
+      pendingCover: pendingCover?.origin === "user" ? pendingCover.file : null,
+      // Reread unfinished source tags, while keeping imported/manual values if
+      // import was disabled after this file was loaded.
+      importMetadata: isReadingMetadata,
+    };
+    selectionToken++;
+    sourceSelectionToken++;
+    isReadingAudio = false;
+    isReadingMetadata = false;
+    selectedAudioFile = null;
+    selectedAudioFormat = null;
+    clearMetadata();
+    invalidateDownload();
+    document.getElementById("single-editor").hidden = true;
+    audioDrop.classList.remove("is-checking");
+    dropTitle.textContent = "Drop audio files here";
+  }
+  batch.add(files, importMetadataInput.checked, seed);
+}
+
+function selectAudioFiles(files) {
+  if (batch.active || files.length > 1) {
+    addToBatch(files);
+    fileInput.value = "";
+  } else selectAudioFile(files[0]);
+}
+
+fileInput.addEventListener("change", () => selectAudioFiles([...fileInput.files]));
+addAudioBtn.addEventListener("click", () => { if (!isProcessing) albumFilesInput.click(); });
+albumFilesInput.addEventListener("change", () => {
+  addToBatch([...albumFilesInput.files]);
+  albumFilesInput.value = "";
+});
 coverInput.addEventListener("change", () => selectCoverFile(coverInput.files?.[0]));
 replaceAudioBtn.addEventListener("click", () => { if (!isProcessing) fileInput.click(); });
 removeAudioBtn.addEventListener("click", removeAudio);
@@ -995,33 +1075,13 @@ for (const [name, input] of Object.entries(fields)) {
     updateActionAvailability();
   });
 }
-wireDropTarget(audioDrop, selectAudioFile, setAudioError);
-wireDropTarget(fileSummary, selectAudioFile, setAudioError);
+wireDropTarget(audioDrop, selectAudioFiles, setAudioError, true);
+wireDropTarget(fileSummary, selectAudioFiles, setAudioError, true);
 wireDropTarget(coverDrop, selectCoverFile, setCoverError);
 document.addEventListener("dragover", (event) => event.preventDefault());
 document.addEventListener("drop", (event) => event.preventDefault());
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (isProcessing || isReadingAudio || isReadingMetadata || pendingCover) return;
-  if (!selectedAudioFile) {
-    setAudioError("Choose an audio file before creating your Spotify MP3.");
-    fileInput.focus();
-    return;
-  }
-  if (!validateTrack()) {
-    fields.track.focus();
-    return;
-  }
-
-  // Snapshot only after acquiring the submission guard; edits are locked until done.
-  const file = selectedAudioFile;
-  const values = Object.fromEntries(Object.entries(fields).map(([name, input]) => [name, input.value.trim()]));
-  const cover = selectedCoverFile;
-  const focusedControl = form.contains(document.activeElement) ? document.activeElement : null;
-  clearDownload();
-  setBusy(true);
-  setAudioError("");
+async function processTrack({ file, values, cover }) {
   try {
     await setStage("Reading audio…");
     let songBuffer = await file.arrayBuffer();
@@ -1045,7 +1105,39 @@ form.addEventListener("submit", async (event) => {
       throw new ProcessingError("The metadata writer could not load. Check your connection and try again. Your details are still here.");
     }
     const coverBuffer = cover ? await cover.arrayBuffer() : null;
-    const blob = await writeMp3Tags({ ID3Writer, songBuffer, ...values, coverBuffer });
+    return await writeMp3Tags({ ID3Writer, songBuffer, ...values, coverBuffer });
+  } finally {
+    if (audioCtx) {
+      await audioCtx.close().catch(() => {});
+      audioCtx = null;
+    }
+  }
+}
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (batch.active) { await batch.process(); return; }
+  if (isProcessing || isReadingAudio || isReadingMetadata || pendingCover) return;
+  if (!selectedAudioFile) {
+    setAudioError("Choose an audio file before creating your Spotify MP3.");
+    fileInput.focus();
+    return;
+  }
+  if (!validateTrack()) {
+    fields.track.focus();
+    return;
+  }
+
+  // Snapshot only after acquiring the submission guard; edits are locked until done.
+  const file = selectedAudioFile;
+  const values = Object.fromEntries(Object.entries(fields).map(([name, input]) => [name, input.value.trim()]));
+  const cover = selectedCoverFile;
+  const focusedControl = form.contains(document.activeElement) ? document.activeElement : null;
+  clearDownload();
+  setBusy(true);
+  setAudioError("");
+  try {
+    const blob = await processTrack({ file, values, cover });
     await setStage("Preparing download…");
     downloadUrl = URL.createObjectURL(blob);
     const outName = outputName(values.artist, values.title, file.name);
@@ -1083,6 +1175,7 @@ form.addEventListener("submit", async (event) => {
 window.addEventListener("pagehide", (event) => {
   // Back/forward cache retains the page and its retryable download/preview URLs.
   if (event.persisted) return;
+  batch.dispose();
   if (downloadUrl) URL.revokeObjectURL(downloadUrl);
   if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
   for (const [url, timer] of retiredDownloadUrls) {
@@ -1091,6 +1184,16 @@ window.addEventListener("pagehide", (event) => {
   }
   retiredDownloadUrls.clear();
   if (audioCtx) audioCtx.close().catch(() => {});
+});
+
+batch = createBatchEditor({
+  inspectAudio, validateArtwork, processTrack, formatLabel, validTrack,
+  safeName, outputName, setBusy, setStatus,
+  updateActions: updateActionAvailability,
+  finishProcessing() {
+    progressEl.hidden = true;
+    setBusy(false);
+  },
 });
 
 renderCoverState();

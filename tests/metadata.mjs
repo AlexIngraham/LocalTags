@@ -155,6 +155,22 @@ test("reads ID3 tags stored in a WAV chunk", async () => {
   assert.deepEqual(await readSourceMetadata(file(source, "source.wav")), { title: "Embedded ID3" });
 });
 
+test("imports album artist independently of track artist in ID3, FLAC and WAV", async () => {
+  for (const version of [2, 3, 4]) {
+    const source = tag([
+      frame(version === 2 ? "TP1" : "TPE1", text("Track artist"), version),
+      frame(version === 2 ? "TP2" : "TPE2", text("Album artist"), version),
+    ], version);
+    assert.deepEqual(await readSourceMetadata(file(source)), { artist: "Track artist", albumArtist: "Album artist" });
+    assert.equal((await readSourceMetadata(file(wave([waveChunk("id3 ", source)])))).albumArtist, "Album artist");
+  }
+  for (const key of ["ALBUMARTIST", "ALBUM ARTIST"]) {
+    const entry = Buffer.from(`${key}=Album artist`);
+    const source = Buffer.concat([ascii("fLaC"), flacBlock(4, Buffer.concat([le(0), le(1), le(entry.length), entry]), true)]);
+    assert.equal((await readSourceMetadata(file(source))).albumArtist, "Album artist");
+  }
+});
+
 test("skips malformed tags, unavailable files, and unsupported source formats", async () => {
   for (const bytes of [Buffer.alloc(0), ascii("not an audio file"), tag([ascii("TIT2"), be(999999), Buffer.alloc(8)]),
     Buffer.concat([ascii("fLaC"), flacBlock(4, Buffer.from([255, 255, 255, 255]), true)])]) {

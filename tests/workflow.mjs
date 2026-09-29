@@ -10,6 +10,7 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join, extname } from "node:path";
 import { chromium } from "playwright";
+import { runBatchChecks } from "./batch-workflows.mjs";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(testRoot, "..");
@@ -87,6 +88,7 @@ async function delayMetadata(page, filename) {
         const read = blob.arrayBuffer.bind(blob);
         blob.arrayBuffer = async () => {
           window.__metadataWaiting = true;
+          window.__metadataWaitingCount = (window.__metadataWaitingCount || 0) + 1;
           await gate;
           const bytes = await read();
           setTimeout(finish, 0);
@@ -140,7 +142,7 @@ function readTags(bytes) {
 
 const server = createServer(async (request, response) => {
   const path = new URL(request.url, "http://localhost").pathname;
-  const allowed = /^\/(?:main\.html|style\.css|app\.js|metadata\.js)$/;
+  const allowed = /^\/(?:main\.html|style\.css|app\.js|metadata\.js|batch\.js|zip\.js)$/;
   if (!allowed.test(path)) return response.writeHead(404).end();
   try {
     const contents = await readFile(join(projectRoot, path.slice(1)));
@@ -688,6 +690,8 @@ try {
       readTags(await readFile(await downloaded.path()));
     });
   }
+
+  await runBatchChecks({ check, ready, completeMp3, audioFixture, artworkFixture, delayMetadata, releaseMetadata, readTags, outputRoot });
 
   await check("mobile layout, focus visibility, labels, status announcements, and reduced motion", async (page) => {
     for (const width of [320, 375, 768, 1280]) {
